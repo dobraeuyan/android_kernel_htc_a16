@@ -22,6 +22,7 @@
 #include <linux/i2c/sensors/common/st_sensors_htc.h>
 #include <linux/qpnp_vibrator.h>
 
+/* WA can be set between 0 and 100 (example 25 = 0.25)*/
 #define WA             (15)
 static int filtered_data[3] = { 0 };
 
@@ -126,7 +127,7 @@ int st_sensors_get_buffer_element(struct iio_dev *indio_dev, u8 *buf)
 			buf, sdata->multiread_bit);
 		st_sensors_add_offset(sdata, buf);
 
-		
+		/* WA: Vibration caused unstable sensor data. */
 		if (len > 0) {
 			for (t = 0; t < 3; t++) {
 				current_data[t] = (s16)*((u16 *)&buf[t * 2]);
@@ -165,7 +166,7 @@ irqreturn_t st_sensors_trigger_handler(int irq, void *p)
 		*(s64 *)((u8 *)sdata->buffer_data +
 				ALIGN(len, sizeof(s64))) = pf->timestamp;
 
-	
+	/* WA: Drop the first event due to data is unstable. */
 	if (drop_event) {
 		drop_event = false;
 	} else {

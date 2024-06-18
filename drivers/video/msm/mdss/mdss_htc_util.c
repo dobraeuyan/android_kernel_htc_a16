@@ -28,6 +28,29 @@ struct attribute_status htc_cabc_level[] = {
 	{"cabc_level_ctl", 1, 1, 1},
 };
 
+/***********************************************
+      Color temperature table
+Temperature  index  mv0  mv4  mv8
+   5500      -100    44  301  512
+   6500         0   512  512  512
+   7500       100   512  355  269
+
+            Color saturation table
+index mv0  mv1  mv2  mv3 mv4  mv5  mv6  mv7 mv8
+-100  153  301   58  153 301   58  153  301  58
+   0  512    0    0    0 512    0    0    0 512
+ 100  871 7891 8134 8039 723 8134 8039 7891 966
+
+               Color hue table
+index mv0 mv1  mv2 mv3 mv4  mv5  mv6 mv7  mv8
+-180 7986 601  117 306  89  117  306 601 7797
+-133 8189 679 8028 148 122  242  589 228 7887
+-132    3 678 8023 144 124  244  593 219 7892
+   0  512   0    0   0 512    0    0   0  512
+  95    1  90  421 316 329 8059 7907 705   92
+  96 8187  95  421 318 326 8060 7910 710   84
+ 180 7986 601  117 306  89  117  306 601 7797
+************************************************/
 struct attribute_status htc_mdss_csc_cfg_mv0[] = {
 	{"mdss_csc_cfg_mv0", 512, 512, 512},
 };
@@ -89,14 +112,21 @@ static ssize_t dsi_cmd_write(
 	if (!ctrl_instance)
 		return count;
 
-	
+	/* end of string */
 	debug_buf[count] = 0;
 
-	
+	/* Format:
+	ex: echo 39 51 ff > dsi_cmd
+	     [type] space [addr] space [value]
+	     +--+--+-----+--+--+------+--+--+-
+	bit   0  1    2   3  4     5   6  7
+	ex:    39          51           ff
+	*/
+	/* Calc the count, min count = 9, format: type addr value */
 	cnt = (count) / 3 - 1;
 	debug_cmd.dchdr.dlen = cnt;
 
-	
+	/* Get the type */
 	sscanf(debug_buf, "%x", &type);
 
 	if (type == DTYPE_DCS_LWRITE)
@@ -108,7 +138,7 @@ static ssize_t dsi_cmd_write(
 
 	PR_DISP_INFO("%s: cnt=%d, type=0x%x\n", __func__, cnt, type);
 
-	
+	/* Get the cmd and value */
 	for (i = 0; i < cnt; i++) {
 		if (i >= DCS_MAX_CNT) {
 			PR_DISP_INFO("%s: DCS command count over DCS_MAX_CNT, Skip these commands.\n", __func__);
@@ -383,7 +413,7 @@ void htc_register_attrs(struct kobject *led_kobj, struct msm_fb_data_type *mfd)
 	if (rc)
 		pr_err("sysfs group creation failed, rc=%d\n", rc);
 
-	
+	/* csc initial value */
 	if ((panel_info->csc_type == CSC_TYPE_COLOR_TEMPERATURE) ||
 			(panel_info->csc_type == CSC_TYPE_COLOR_SATURATION) ||
 			(panel_info->csc_type == CSC_TYPE_COLOR_SATURATION_AND_HUE)) {
@@ -490,7 +520,7 @@ struct mdp_csc_cfg_data htc_set_csc_cfg(bool *csc_update, int csc_type)
 
 	if (csc_type == CSC_TYPE_NONE) {
 		*csc_update = false;
-		
+		/* do not use csc config */
 		return data;
 	}
 
@@ -504,11 +534,11 @@ struct mdp_csc_cfg_data htc_set_csc_cfg(bool *csc_update, int csc_type)
 			(htc_mdss_csc_cfg_mv7[0].req_value == htc_mdss_csc_cfg_mv7[0].cur_value) &&
 			(htc_mdss_csc_cfg_mv8[0].req_value == htc_mdss_csc_cfg_mv8[0].cur_value)) {
 		*csc_update = false;
-		
+		/* use the same csc cfg */
 		return data;
 	}
 
-	
+	/* matrix vector: 3x3 */
 	data.csc_data.csc_mv[0] = htc_mdss_csc_cfg_mv0[0].req_value;
 	data.csc_data.csc_mv[4] = htc_mdss_csc_cfg_mv4[0].req_value;
 	data.csc_data.csc_mv[8] = htc_mdss_csc_cfg_mv8[0].req_value;
@@ -520,7 +550,7 @@ struct mdp_csc_cfg_data htc_set_csc_cfg(bool *csc_update, int csc_type)
 		data.csc_data.csc_mv[5] = htc_mdss_csc_cfg_mv5[0].req_value;
 		data.csc_data.csc_mv[6] = htc_mdss_csc_cfg_mv6[0].req_value;
 		data.csc_data.csc_mv[7] = htc_mdss_csc_cfg_mv7[0].req_value;
-	} else { 
+	} else { /* CSC_TYPE_COLOR_TEMPERATURE */
 		data.csc_data.csc_mv[1] = htc_mdss_csc_cfg_mv1[0].req_value = 0;
 		data.csc_data.csc_mv[2] = htc_mdss_csc_cfg_mv2[0].req_value = 0;
 		data.csc_data.csc_mv[3] = htc_mdss_csc_cfg_mv3[0].req_value = 0;
@@ -529,15 +559,15 @@ struct mdp_csc_cfg_data htc_set_csc_cfg(bool *csc_update, int csc_type)
 		data.csc_data.csc_mv[7] = htc_mdss_csc_cfg_mv7[0].req_value = 0;
 	}
 
-	
+	/* pre-bias vector: 1x3 */
 	for (i = 0 ; i < 3 ; i++)
 		data.csc_data.csc_pre_bv[i] = 0;
 
-	
+	/* post-bias vecotr: 1x3 */
 	for (i = 0 ; i < 3 ; i++)
 		data.csc_data.csc_post_bv[i] = 0;
 
-	
+	/* pre-limit vector: 1x6 */
 	for (i = 0 ; i < 6 ; i++) {
 		if (i == 0 || i == 2 || i == 4)
 			data.csc_data.csc_pre_lv[i] = 0;
@@ -545,7 +575,7 @@ struct mdp_csc_cfg_data htc_set_csc_cfg(bool *csc_update, int csc_type)
 			data.csc_data.csc_pre_lv[i] = 255;
 	}
 
-	
+	/* post-limit vector: 1x6 */
 	for (i = 0 ; i < 6 ; i++) {
 		if (i == 0 || i == 2 || i == 4)
 			data.csc_data.csc_post_lv[i] = 0;
@@ -629,6 +659,6 @@ void htc_dimming_on(struct msm_fb_data_type *mfd)
 
 void htc_dimming_off(void)
 {
-	
+	/* Delete dimming workqueue */
 	cancel_delayed_work_sync(&dimming_work);
 }

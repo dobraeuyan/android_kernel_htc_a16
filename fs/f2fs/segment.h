@@ -10,11 +10,13 @@
  */
 #include <linux/blkdev.h>
 
+/* constant macro */
 #define NULL_SEGNO			((unsigned int)(~0))
 #define NULL_SECNO			((unsigned int)(~0))
 
-#define DEF_RECLAIM_PREFREE_SEGMENTS	5	
+#define DEF_RECLAIM_PREFREE_SEGMENTS	5	/* 5% over total segments */
 
+/* L: Logical segment # in volume, R: Relative segment # in main area */
 #define GET_L2R_SEGNO(free_i, segno)	(segno - free_i->start_segno)
 #define GET_R2L_SEGNO(free_i, segno)	(segno + free_i->start_segno)
 
@@ -101,50 +103,75 @@
 #define MAX_BIO_BLOCKS(sbi)						\
 	((int)min((int)max_hw_blocks(sbi), BIO_MAX_PAGES))
 
+/*
+ * indicate a block allocation direction: RIGHT and LEFT.
+ * RIGHT means allocating new sections towards the end of volume.
+ * LEFT means the opposite direction.
+ */
 enum {
 	ALLOC_RIGHT = 0,
 	ALLOC_LEFT
 };
 
+/*
+ * In the victim_sel_policy->alloc_mode, there are two block allocation modes.
+ * LFS writes data sequentially with cleaning operations.
+ * SSR (Slack Space Recycle) reuses obsolete space without cleaning operations.
+ */
 enum {
 	LFS = 0,
 	SSR
 };
 
+/*
+ * In the victim_sel_policy->gc_mode, there are two gc, aka cleaning, modes.
+ * GC_CB is based on cost-benefit algorithm.
+ * GC_GREEDY is based on greedy algorithm.
+ */
 enum {
 	GC_CB = 0,
 	GC_GREEDY
 };
 
+/*
+ * BG_GC means the background cleaning job.
+ * FG_GC means the on-demand cleaning job.
+ * FORCE_FG_GC means on-demand cleaning job in background.
+ */
 enum {
 	BG_GC = 0,
 	FG_GC,
 	FORCE_FG_GC,
 };
 
+/* for a function parameter to select a victim segment */
 struct victim_sel_policy {
-	int alloc_mode;			
-	int gc_mode;			
-	unsigned long *dirty_segmap;	
-	unsigned int max_search;	
-	unsigned int offset;		
-	unsigned int ofs_unit;		
-	unsigned int min_cost;		
-	unsigned int min_segno;		
+	int alloc_mode;			/* LFS or SSR */
+	int gc_mode;			/* GC_CB or GC_GREEDY */
+	unsigned long *dirty_segmap;	/* dirty segment bitmap */
+	unsigned int max_search;	/* maximum # of segments to search */
+	unsigned int offset;		/* last scanned bitmap offset */
+	unsigned int ofs_unit;		/* bitmap search unit */
+	unsigned int min_cost;		/* minimum cost */
+	unsigned int min_segno;		/* segment # having min. cost */
 };
 
 struct seg_entry {
-	unsigned short valid_blocks;	
-	unsigned char *cur_valid_map;	
+	unsigned short valid_blocks;	/* # of valid blocks */
+	unsigned char *cur_valid_map;	/* validity bitmap of blocks */
+	/*
+	 * # of valid blocks and the validity bitmap stored in the the last
+	 * checkpoint pack. This information is used by the SSR mode.
+	 */
 	unsigned short ckpt_valid_blocks;
 	unsigned char *ckpt_valid_map;
 	unsigned char *discard_map;
-	unsigned char type;		
-	unsigned long long mtime;	
+	unsigned char type;		/* segment type like CURSEG_XXX_TYPE */
+	unsigned long long mtime;	/* modification time of the segment */
 };
 
 struct sec_entry {
-	unsigned int valid_blocks;	
+	unsigned int valid_blocks;	/* # of valid blocks in a section */
 };
 
 struct segment_allocation {
@@ -168,77 +195,83 @@ struct inmem_pages {
 struct sit_info {
 	const struct segment_allocation *s_ops;
 
-	block_t sit_base_addr;		
-	block_t sit_blocks;		
-	block_t written_valid_blocks;	
-	char *sit_bitmap;		
-	unsigned int bitmap_size;	
+	block_t sit_base_addr;		/* start block address of SIT area */
+	block_t sit_blocks;		/* # of blocks used by SIT area */
+	block_t written_valid_blocks;	/* # of valid blocks in main area */
+	char *sit_bitmap;		/* SIT bitmap pointer */
+	unsigned int bitmap_size;	/* SIT bitmap size */
 
-	unsigned long *tmp_map;			
-	unsigned long *dirty_sentries_bitmap;	
-	unsigned int dirty_sentries;		
-	unsigned int sents_per_block;		
-	struct mutex sentry_lock;		
-	struct seg_entry *sentries;		
-	struct sec_entry *sec_entries;		
+	unsigned long *tmp_map;			/* bitmap for temporal use */
+	unsigned long *dirty_sentries_bitmap;	/* bitmap for dirty sentries */
+	unsigned int dirty_sentries;		/* # of dirty sentries */
+	unsigned int sents_per_block;		/* # of SIT entries per block */
+	struct mutex sentry_lock;		/* to protect SIT cache */
+	struct seg_entry *sentries;		/* SIT segment-level cache */
+	struct sec_entry *sec_entries;		/* SIT section-level cache */
 
-	
-	unsigned long long elapsed_time;	
-	unsigned long long mounted_time;	
-	unsigned long long min_mtime;		
-	unsigned long long max_mtime;		
+	/* for cost-benefit algorithm in cleaning procedure */
+	unsigned long long elapsed_time;	/* elapsed time after mount */
+	unsigned long long mounted_time;	/* mount time */
+	unsigned long long min_mtime;		/* min. modification time */
+	unsigned long long max_mtime;		/* max. modification time */
 };
 
 struct free_segmap_info {
-	unsigned int start_segno;	
-	unsigned int free_segments;	
-	unsigned int free_sections;	
-	spinlock_t segmap_lock;		
-	unsigned long *free_segmap;	
-	unsigned long *free_secmap;	
+	unsigned int start_segno;	/* start segment number logically */
+	unsigned int free_segments;	/* # of free segments */
+	unsigned int free_sections;	/* # of free sections */
+	spinlock_t segmap_lock;		/* free segmap lock */
+	unsigned long *free_segmap;	/* free segment bitmap */
+	unsigned long *free_secmap;	/* free section bitmap */
 };
 
+/* Notice: The order of dirty type is same with CURSEG_XXX in f2fs.h */
 enum dirty_type {
-	DIRTY_HOT_DATA,		
-	DIRTY_WARM_DATA,	
-	DIRTY_COLD_DATA,	
-	DIRTY_HOT_NODE,		
-	DIRTY_WARM_NODE,	
-	DIRTY_COLD_NODE,	
-	DIRTY,			
-	PRE,			
+	DIRTY_HOT_DATA,		/* dirty segments assigned as hot data logs */
+	DIRTY_WARM_DATA,	/* dirty segments assigned as warm data logs */
+	DIRTY_COLD_DATA,	/* dirty segments assigned as cold data logs */
+	DIRTY_HOT_NODE,		/* dirty segments assigned as hot node logs */
+	DIRTY_WARM_NODE,	/* dirty segments assigned as warm node logs */
+	DIRTY_COLD_NODE,	/* dirty segments assigned as cold node logs */
+	DIRTY,			/* to count # of dirty segments */
+	PRE,			/* to count # of entirely obsolete segments */
 	NR_DIRTY_TYPE
 };
 
 struct dirty_seglist_info {
-	const struct victim_selection *v_ops;	
+	const struct victim_selection *v_ops;	/* victim selction operation */
 	unsigned long *dirty_segmap[NR_DIRTY_TYPE];
-	struct mutex seglist_lock;		
-	int nr_dirty[NR_DIRTY_TYPE];		
-	unsigned long *victim_secmap;		
+	struct mutex seglist_lock;		/* lock for segment bitmaps */
+	int nr_dirty[NR_DIRTY_TYPE];		/* # of dirty segments */
+	unsigned long *victim_secmap;		/* background GC victims */
 };
 
+/* victim selection function for cleaning and SSR */
 struct victim_selection {
 	int (*get_victim)(struct f2fs_sb_info *, unsigned int *,
 							int, int, char);
 };
 
+/* for active log information */
 struct curseg_info {
-	struct mutex curseg_mutex;		
-	struct f2fs_summary_block *sum_blk;	
-	unsigned char alloc_type;		
-	unsigned int segno;			
-	unsigned short next_blkoff;		
-	unsigned int zone;			
-	unsigned int next_segno;		
+	struct mutex curseg_mutex;		/* lock for consistency */
+	struct f2fs_summary_block *sum_blk;	/* cached summary block */
+	unsigned char alloc_type;		/* current allocation type */
+	unsigned int segno;			/* current segment number */
+	unsigned short next_blkoff;		/* next block offset to write */
+	unsigned int zone;			/* current zone number */
+	unsigned int next_segno;		/* preallocated segment */
 };
 
 struct sit_entry_set {
-	struct list_head set_list;	
-	unsigned int start_segno;	
-	unsigned int entry_cnt;		
+	struct list_head set_list;	/* link with all sit sets */
+	unsigned int start_segno;	/* start segno of sits in set */
+	unsigned int entry_cnt;		/* the # of sit entries in set */
 };
 
+/*
+ * inline functions
+ */
 static inline struct curseg_info *CURSEG_I(struct f2fs_sb_info *sbi, int type)
 {
 	return (struct curseg_info *)(SM_I(sbi)->curseg_array + type);
@@ -261,6 +294,10 @@ static inline struct sec_entry *get_sec_entry(struct f2fs_sb_info *sbi,
 static inline unsigned int get_valid_blocks(struct f2fs_sb_info *sbi,
 				unsigned int segno, int section)
 {
+	/*
+	 * In order to get # of valid blocks in a section instantly from many
+	 * segments, f2fs manages two counting structures separately.
+	 */
 	if (section > 1)
 		return get_sec_entry(sbi, segno)->valid_blocks;
 	else
@@ -455,6 +492,20 @@ static inline int utilization(struct f2fs_sb_info *sbi)
 					sbi->user_block_count);
 }
 
+/*
+ * Sometimes f2fs may be better to drop out-of-place update policy.
+ * And, users can control the policy through sysfs entries.
+ * There are five policies with triggering conditions as follows.
+ * F2FS_IPU_FORCE - all the time,
+ * F2FS_IPU_SSR - if SSR mode is activated,
+ * F2FS_IPU_UTIL - if FS utilization is over threashold,
+ * F2FS_IPU_SSR_UTIL - if SSR mode is activated and FS utilization is over
+ *                     threashold,
+ * F2FS_IPU_FSYNC - activated in fsync path only for high performance flash
+ *                     storages. IPU will be triggered only if the # of dirty
+ *                     pages over min_fsync_blocks.
+ * F2FS_IPUT_DISABLE - disable IPU. (=default option)
+ */
 #define DEF_MIN_IPU_UTIL	70
 #define DEF_MIN_FSYNC_BLOCKS	8
 
@@ -471,7 +522,7 @@ static inline bool need_inplace_update(struct inode *inode)
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	unsigned int policy = SM_I(sbi)->ipu_policy;
 
-	
+	/* IPU can be done only for the user data */
 	if (S_ISDIR(inode->i_mode) || f2fs_is_atomic_file(inode))
 		return false;
 
@@ -486,7 +537,7 @@ static inline bool need_inplace_update(struct inode *inode)
 			utilization(sbi) > SM_I(sbi)->min_ipu_util)
 		return true;
 
-	
+	/* this is only set during fdatasync */
 	if (policy & (0x1 << F2FS_IPU_FSYNC) &&
 			is_inode_flag_set(F2FS_I(inode), FI_NEED_IPU))
 		return true;
@@ -525,6 +576,9 @@ static inline void verify_block_addr(struct f2fs_sb_info *sbi, block_t blk_addr)
 					|| blk_addr >= MAX_BLKADDR(sbi));
 }
 
+/*
+ * Summary block is always treated as an invalid block
+ */
 static inline void check_block_count(struct f2fs_sb_info *sbi,
 		int segno, struct f2fs_sit_entry *raw_sit)
 {
@@ -533,7 +587,7 @@ static inline void check_block_count(struct f2fs_sb_info *sbi,
 	int valid_blocks = 0;
 	int cur_pos = 0, next_pos;
 
-	
+	/* check bitmap with valid block count */
 	do {
 		if (is_valid) {
 			next_pos = find_next_zero_bit_le(&raw_sit->valid_map,
@@ -549,7 +603,7 @@ static inline void check_block_count(struct f2fs_sb_info *sbi,
 	} while (cur_pos < sbi->blocks_per_seg);
 	BUG_ON(GET_SIT_VBLOCKS(raw_sit) != valid_blocks);
 #endif
-	
+	/* check segment usage, and check boundary of a given segment number */
 	f2fs_bug_on(sbi, GET_SIT_VBLOCKS(raw_sit) > sbi->blocks_per_seg
 					|| segno > TOTAL_SEGS(sbi) - 1);
 }
@@ -563,7 +617,7 @@ static inline pgoff_t current_sit_addr(struct f2fs_sb_info *sbi,
 
 	check_seg_range(sbi, start);
 
-	
+	/* calculate sit block address */
 	if (f2fs_test_bit(offset, sit_i->sit_bitmap))
 		blk_addr += sit_i->sit_blocks;
 
@@ -632,6 +686,13 @@ static inline unsigned int max_hw_blocks(struct f2fs_sb_info *sbi)
 	return SECTOR_TO_BLOCK(queue_max_sectors(q));
 }
 
+/*
+ * It is very important to gather dirty pages and write at once, so that we can
+ * submit a big bio without interfering other data writes.
+ * By default, 512 pages for directory data,
+ * 512 pages (2MB) * 3 for three types of nodes, and
+ * max_bio_blocks for meta are set.
+ */
 static inline int nr_pages_to_skip(struct f2fs_sb_info *sbi, int type)
 {
 	if (sbi->sb->s_bdi->dirty_exceeded)
@@ -647,6 +708,9 @@ static inline int nr_pages_to_skip(struct f2fs_sb_info *sbi, int type)
 		return 0;
 }
 
+/*
+ * When writing pages, it'd better align nr_to_write for segment size.
+ */
 static inline long nr_pages_to_write(struct f2fs_sb_info *sbi, int type,
 					struct writeback_control *wbc)
 {

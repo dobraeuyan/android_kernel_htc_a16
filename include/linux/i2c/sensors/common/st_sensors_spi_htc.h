@@ -17,4 +17,4 @@
 void st_sensors_spi_configure(struct iio_dev *indio_dev,
 			struct spi_device *spi, struct st_sensor_data *sdata);
 
-#endif 
+#endif /* ST_SENSORS_SPI_H */

@@ -46,6 +46,7 @@
 #include "f2fs.h"
 #include "xattr.h"
 
+/* Encryption added and removed here! (L: */
 
 static unsigned int num_prealloc_crypto_pages = 32;
 static unsigned int num_prealloc_crypto_ctxs = 128;
@@ -68,6 +69,15 @@ static DEFINE_MUTEX(crypto_init);
 static struct kmem_cache *f2fs_crypto_ctx_cachep;
 struct kmem_cache *f2fs_crypt_info_cachep;
 
+/**
+ * f2fs_release_crypto_ctx() - Releases an encryption context
+ * @ctx: The encryption context to release.
+ *
+ * If the encryption context was allocated from the pre-allocated pool, returns
+ * it to that pool. Else, frees it.
+ *
+ * If there's a bounce page in the context, this frees that.
+ */
 void f2fs_release_crypto_ctx(struct f2fs_crypto_ctx *ctx)
 {
 	unsigned long flags;
@@ -86,6 +96,15 @@ void f2fs_release_crypto_ctx(struct f2fs_crypto_ctx *ctx)
 	}
 }
 
+/**
+ * f2fs_get_crypto_ctx() - Gets an encryption context
+ * @inode:       The inode for which we are doing the crypto
+ *
+ * Allocates and initializes an encryption context.
+ *
+ * Return: An allocated and initialized encryption context on success; error
+ * value or NULL otherwise.
+ */
 struct f2fs_crypto_ctx *f2fs_get_crypto_ctx(struct inode *inode)
 {
 	struct f2fs_crypto_ctx *ctx = NULL;
@@ -95,6 +114,16 @@ struct f2fs_crypto_ctx *f2fs_get_crypto_ctx(struct inode *inode)
 	if (ci == NULL)
 		return ERR_PTR(-ENOKEY);
 
+	/*
+	 * We first try getting the ctx from a free list because in
+	 * the common case the ctx will have an allocated and
+	 * initialized crypto tfm, so it's probably a worthwhile
+	 * optimization. For the bounce page, we first try getting it
+	 * from the kernel allocator because that's just about as fast
+	 * as getting it from a list and because a cache of free pages
+	 * should generally be a "last resort" option for a filesystem
+	 * to be able to do its job.
+	 */
 	spin_lock_irqsave(&f2fs_crypto_ctx_lock, flags);
 	ctx = list_first_entry_or_null(&f2fs_free_crypto_ctxs,
 					struct f2fs_crypto_ctx, free_list);
@@ -113,6 +142,10 @@ struct f2fs_crypto_ctx *f2fs_get_crypto_ctx(struct inode *inode)
 	return ctx;
 }
 
+/*
+ * Call f2fs_decrypt on every single page, reusing the encryption
+ * context.
+ */
 static void completion_pages(struct work_struct *work)
 {
 	struct f2fs_crypto_ctx *ctx =
@@ -155,6 +188,14 @@ static void f2fs_crypto_destroy(void)
 	f2fs_bounce_page_pool = NULL;
 }
 
+/**
+ * f2fs_crypto_initialize() - Set up for f2fs encryption.
+ *
+ * We only call this when we start accessing encrypted files, since it
+ * results in memory getting allocated that wouldn't otherwise be used.
+ *
+ * Return: Zero on success, non-zero otherwise.
+ */
 int f2fs_crypto_initialize(void)
 {
 	int i, res = -ENOMEM;
@@ -175,7 +216,7 @@ int f2fs_crypto_initialize(void)
 		list_add(&ctx->free_list, &f2fs_free_crypto_ctxs);
 	}
 
-	
+	/* must be allocated at the last step to avoid race condition above */
 	f2fs_bounce_page_pool =
 		mempool_create_page_pool(num_prealloc_crypto_pages, 0);
 	if (!f2fs_bounce_page_pool)
@@ -190,6 +231,9 @@ fail:
 	return res;
 }
 
+/**
+ * f2fs_exit_crypto() - Shutdown the f2fs encryption system
+ */
 void f2fs_exit_crypto(void)
 {
 	f2fs_crypto_destroy();
@@ -231,15 +275,15 @@ void f2fs_restore_and_release_control_page(struct page **page)
 	struct f2fs_crypto_ctx *ctx;
 	struct page *bounce_page;
 
-	
+	/* The bounce data pages are unmapped. */
 	if ((*page)->mapping)
 		return;
 
-	
+	/* The bounce data page is unmapped. */
 	bounce_page = *page;
 	ctx = (struct f2fs_crypto_ctx *)page_private(bounce_page);
 
-	
+	/* restore control page */
 	*page = ctx->w.control_page;
 
 	f2fs_restore_control_page(bounce_page);
@@ -256,6 +300,11 @@ void f2fs_restore_control_page(struct page *data_page)
 	f2fs_release_crypto_ctx(ctx);
 }
 
+/**
+ * f2fs_crypt_complete() - The completion callback for page encryption
+ * @req: The asynchronous encryption request context
+ * @res: The result of the encryption operation
+ */
 static void f2fs_crypt_complete(struct crypto_async_request *req, int res)
 {
 	struct f2fs_completion_result *ecr = req->data;
@@ -336,6 +385,21 @@ static struct page *alloc_bounce_page(struct f2fs_crypto_ctx *ctx)
 	return ctx->w.bounce_page;
 }
 
+/**
+ * f2fs_encrypt() - Encrypts a page
+ * @inode:          The inode for which the encryption should take place
+ * @plaintext_page: The page to encrypt. Must be locked.
+ *
+ * Allocates a ciphertext page and encrypts plaintext_page into it using the ctx
+ * encryption context.
+ *
+ * Called on the page write path.  The caller must call
+ * f2fs_restore_control_page() on the returned ciphertext page to
+ * release the bounce buffer and the encryption context.
+ *
+ * Return: An allocated page with the encrypted content on success. Else, an
+ * error value or NULL.
+ */
 struct page *f2fs_encrypt(struct inode *inode,
 			  struct page *plaintext_page)
 {
@@ -349,7 +413,7 @@ struct page *f2fs_encrypt(struct inode *inode,
 	if (IS_ERR(ctx))
 		return (struct page *)ctx;
 
-	
+	/* The encryption operation will require a bounce page. */
 	ciphertext_page = alloc_bounce_page(ctx);
 	if (IS_ERR(ciphertext_page))
 		goto err_out;
@@ -372,6 +436,17 @@ err_out:
 	return ciphertext_page;
 }
 
+/**
+ * f2fs_decrypt() - Decrypts a page in-place
+ * @ctx:  The encryption context.
+ * @page: The page to decrypt. Must be locked.
+ *
+ * Decrypts page in-place using the ctx encryption context.
+ *
+ * Called from the read completion callback.
+ *
+ * Return: Zero on success, non-zero otherwise.
+ */
 int f2fs_decrypt(struct f2fs_crypto_ctx *ctx, struct page *page)
 {
 	BUG_ON(!PageLocked(page));
@@ -380,6 +455,10 @@ int f2fs_decrypt(struct f2fs_crypto_ctx *ctx, struct page *page)
 				F2FS_DECRYPT, page->index, page, page);
 }
 
+/*
+ * Convenience function which takes care of allocating and
+ * deallocating the encryption context
+ */
 int f2fs_decrypt_one(struct inode *inode, struct page *page)
 {
 	struct f2fs_crypto_ctx *ctx = f2fs_get_crypto_ctx(inode);
@@ -397,6 +476,13 @@ bool f2fs_valid_contents_enc_mode(uint32_t mode)
 	return (mode == F2FS_ENCRYPTION_MODE_AES_256_XTS);
 }
 
+/**
+ * f2fs_validate_encryption_key_size() - Validate the encryption key size
+ * @mode: The key mode.
+ * @size: The key size to validate.
+ *
+ * Return: The validated key size for @mode. Zero if invalid.
+ */
 uint32_t f2fs_validate_encryption_key_size(uint32_t mode, uint32_t size)
 {
 	if (size == f2fs_encryption_key_size(mode))

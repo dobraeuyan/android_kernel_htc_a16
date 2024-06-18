@@ -24,13 +24,16 @@
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
 
+/* wait for at least 2 vsyncs for lowest refresh rate (24hz) */
 #define VSYNC_TIMEOUT_US 100000
 
+/* Poll time to do recovery during active region */
 #define POLL_TIME_USEC_FOR_LN_CNT 500
 
 #define MDP_INTR_MASK_INTF_VSYNC(intf_num) \
 	(1 << (2 * (intf_num - MDSS_MDP_INTF0) + MDSS_MDP_IRQ_INTF_VSYNC))
 
+/* intf timing settings */
 struct intf_timing_params {
 	u32 width;
 	u32 height;
@@ -113,7 +116,7 @@ int mdss_mdp_video_addr_setup(struct mdss_data_type *mdata,
 
 	for (i = 0; i < count; i++) {
 		head[i].base = mdata->mdss_io.base + offsets[i];
-		pr_debug("adding Video Intf #%d offset=0x%x virt=%p\n", i,
+		pr_debug("adding Video Intf #%d offset=0x%x virt=%pK\n", i,
 				offsets[i], head[i].base);
 		head[i].ref_cnt = 0;
 		head[i].intf_num = i + MDSS_MDP_INTF0;
@@ -139,6 +142,11 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 		return;
 	}
 
+	/*
+	 * Currently, only intf_fifo_overflow is
+	 * supported for recovery sequence for video
+	 * mode DSI interface
+	 */
 	if (event != MDP_INTF_DSI_VIDEO_FIFO_OVERFLOW) {
 		pr_warn("%s: unsupported recovery event:%d\n",
 					__func__, event);
@@ -154,11 +162,16 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 			pinfo->mipi.dsi_pclk_rate :
 			pinfo->clk_rate);
 
-	clk_rate /= 1000;	
+	clk_rate /= 1000;	/* in kHz */
 	if (!clk_rate) {
 		pr_err("Unable to get proper clk_rate\n");
 		return;
 	}
+	/*
+	 * calculate clk_period as pico second to maintain good
+	 * accuracy with high pclk rate and this number is in 17 bit
+	 * range.
+	 */
 	clk_period = 1000000000 / clk_rate;
 	if (!clk_period) {
 		pr_err("Unable to calculate clock period\n");
@@ -171,10 +184,14 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 		 pinfo->lcdc.h_pulse_width +
 		 pinfo->xres) * clk_period;
 
-	
+	/* delay in micro seconds */
 	delay = (time_of_line * (min_ln_cnt +
 			pinfo->lcdc.v_front_porch)) / 1000000;
 
+	/*
+	 * Wait for max delay before
+	 * polling to check active region
+	 */
 	if (delay > POLL_TIME_USEC_FOR_LN_CNT)
 		delay = POLL_TIME_USEC_FOR_LN_CNT;
 
@@ -198,7 +215,7 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 		} else {
 			pr_warn("line count is less. line_cnt = %d\n",
 								line_cnt);
-			
+			/* Add delay so that line count is in active region */
 			udelay(delay);
 		}
 	}
@@ -232,7 +249,7 @@ static int mdss_mdp_video_timegen_setup(struct mdss_mdp_ctl *ctl,
 		display_v_end -= p->h_front_porch;
 	}
 
-	
+	/* TIMING_2 flush bit on 8939 is BIT 31 */
 	if (mdata->mdp_rev == MDSS_MDP_HW_REV_108 &&
 				ctx->intf_num == MDSS_MDP_INTF2)
 		ctl->flush_bits |= BIT(31);
@@ -262,13 +279,13 @@ static int mdss_mdp_video_timegen_setup(struct mdss_mdp_ctl *ctl,
 
 	if (active_h_end) {
 		active_hctl = (active_h_end << 16) | active_h_start;
-		active_hctl |= BIT(31);	
+		active_hctl |= BIT(31);	/* ACTIVE_H_ENABLE */
 	} else {
 		active_hctl = 0;
 	}
 
 	if (active_v_end)
-		active_v_start |= BIT(31); 
+		active_v_start |= BIT(31); /* ACTIVE_V_ENABLE */
 
 	hsync_ctl = (hsync_period << 16) | p->hsync_pulse_width;
 	display_hctl = (hsync_end_x << 16) | hsync_start_x;
@@ -281,9 +298,9 @@ static int mdss_mdp_video_timegen_setup(struct mdss_mdp_ctl *ctl,
 		hsync_polarity = 0;
 		vsync_polarity = 0;
 	}
-	polarity_ctl = (den_polarity << 2)   | 
-		       (vsync_polarity << 1) | 
-		       (hsync_polarity << 0);  
+	polarity_ctl = (den_polarity << 2)   | /*  DEN Polarity  */
+		       (vsync_polarity << 1) | /* VSYNC Polarity */
+		       (hsync_polarity << 0);  /* HSYNC Polarity */
 
 	mdp_video_write(ctx, MDSS_MDP_REG_INTF_HSYNC_CTL, hsync_ctl);
 	mdp_video_write(ctx, MDSS_MDP_REG_INTF_VSYNC_PERIOD_F0,
@@ -425,7 +442,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 			pr_err("Intf %d not in use\n", (inum + MDSS_MDP_INTF0));
 			return -ENODEV;
 		}
-		pr_debug("stop ctl=%d video Intf #%d base=%p", ctl->num,
+		pr_debug("stop ctl=%d video Intf #%d base=%pK", ctl->num,
 			ctx->intf_num, ctx->base);
 	} else {
 		pr_err("Invalid intf number: %d\n", (inum + MDSS_MDP_INTF0));
@@ -443,7 +460,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 		WARN(rc, "intf %d blank error (%d)\n", ctl->intf_num, rc);
 
 		mdp_video_write(ctx, MDSS_MDP_REG_INTF_TIMING_ENGINE_EN, 0);
-		
+		/* wait for at least one VSYNC for proper TG OFF */
 		frame_rate = mdss_panel_get_framerate
 				(&(ctl->panel_data->panel_info));
 		if (!(frame_rate >= 24 && frame_rate <= 240))
@@ -736,7 +753,7 @@ static void mdss_mdp_video_timegen_flush(struct mdss_mdp_ctl *ctl,
 	mdata = ctl->mdata;
 	ctl_flush = (BIT(31) >> (ctl->intf_num - MDSS_MDP_INTF0));
 	if (sctx) {
-		
+		/* For 8939, sctx is always INTF2 and the flush bit is BIT 31 */
 		if (mdata->mdp_rev == MDSS_MDP_HW_REV_108)
 			ctl_flush |= BIT(31);
 		else
@@ -770,6 +787,11 @@ static int mdss_mdp_video_config_fps(struct mdss_mdp_ctl *ctl,
 			return -ENODEV;
 		}
 	} else if (is_split_dst(ctl->mfd)) {
+		/*
+		 * On targets when destination split is enabled, mixer swap
+		 * is not valid. So we can safely assume that ctl->intf_num
+		 * is INTF1. For this case, increment inum to retrieve sctx.
+		 */
 		inum += 1;
 		if (inum < mdata->nintf) {
 			sctx = ((struct mdss_mdp_video_ctx *)
@@ -822,6 +844,10 @@ static int mdss_mdp_video_config_fps(struct mdss_mdp_ctl *ctl,
 				return -EINVAL;
 			}
 
+			/*
+			 * MDP INTF registers are double buffered starting from
+			 * MDP v1.5. No need to wait for vsync on these targets.
+			 */
 			wait4vsync = (mdata->mdp_rev < MDSS_MDP_HW_REV_105);
 
 			if (wait4vsync) {
@@ -864,6 +890,10 @@ static int mdss_mdp_video_config_fps(struct mdss_mdp_ctl *ctl,
 			if (sctx)
 				mdss_mdp_fetch_start_config(sctx, ctl);
 
+			/*
+			 * MDP INTF registers support DB on targets
+			 * starting from MDP v1.5.
+			 */
 			if (!wait4vsync)
 				mdss_mdp_video_timegen_flush(ctl, sctx);
 
@@ -998,7 +1028,7 @@ int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 			return ret;
 		}
 
-		
+		/* clear up mixer0 and mixer1 */
 		flush = 0;
 		for (i = 0; i < 2; i++) {
 			data = mdss_mdp_ctl_read(ctl,
@@ -1013,7 +1043,7 @@ int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 		mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_FLUSH, flush);
 
 		mdp_video_write(ctx, MDSS_MDP_REG_INTF_TIMING_ENGINE_EN, 0);
-		
+		/* wait for 1 VSYNC for the pipe to be unstaged */
 		msleep(20);
 
 		ret = mdss_mdp_ctl_intf_event(ctl,
@@ -1064,6 +1094,10 @@ static void mdss_mdp_fetch_start_config(struct mdss_mdp_video_ctx *ctx,
 		return;
 	}
 
+	/*
+	 * Fetch should always be outside the active lines. If the fetching
+	 * is programmed within active region, hardware behavior is unknown.
+	 */
 	v_total = mdss_panel_get_vtotal(pinfo);
 	h_total = mdss_panel_get_htotal(pinfo, true);
 	ctl->prg_fet = pinfo->lcdc.v_front_porch;
@@ -1124,7 +1158,7 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 				(inum + MDSS_MDP_INTF0));
 			return -EBUSY;
 		}
-		pr_debug("video Intf #%d base=%p", ctx->intf_num, ctx->base);
+		pr_debug("video Intf #%d base=%pK", ctx->intf_num, ctx->base);
 		ctx->ref_cnt++;
 	} else {
 		pr_err("Invalid intf number: %d\n", (inum + MDSS_MDP_INTF0));

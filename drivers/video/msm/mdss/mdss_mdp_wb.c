@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -71,6 +71,7 @@ static struct mdss_mdp_wb mdss_mdp_wb_info;
 static void mdss_mdp_wb_free_node(struct mdss_mdp_wb_data *node);
 
 #ifdef DEBUG_WRITEBACK
+/* for debugging: writeback output buffer to allocated memory */
 static inline
 struct mdss_mdp_data *mdss_mdp_wb_debug_buffer(struct msm_fb_data_type *mfd)
 {
@@ -94,7 +95,7 @@ struct mdss_mdp_data *mdss_mdp_wb_debug_buffer(struct msm_fb_data_type *mfd)
 		ihdl = ion_alloc(iclient, img_size, SZ_4K,
 				 ION_HEAP(ION_SF_HEAP_ID), 0);
 		if (IS_ERR_OR_NULL(ihdl)) {
-			pr_err("unable to alloc fbmem from ion (%p)\n", ihdl);
+			pr_err("unable to alloc fbmem from ion (%pK)\n", ihdl);
 			return NULL;
 		}
 
@@ -121,7 +122,7 @@ struct mdss_mdp_data *mdss_mdp_wb_debug_buffer(struct msm_fb_data_type *mfd)
 			img->len = img_size;
 		}
 
-		pr_debug("ihdl=%p virt=%p phys=0x%pa iova=0x%pa size=%u\n",
+		pr_debug("ihdl=%pK virt=%pK phys=0x%pa iova=0x%pa size=%u\n",
 			 ihdl, videomemory, &mdss_wb_mem, &img->addr, img_size);
 	}
 	return &mdss_wb_buffer;
@@ -134,6 +135,15 @@ struct mdss_mdp_data *mdss_mdp_wb_debug_buffer(struct msm_fb_data_type *mfd)
 }
 #endif
 
+/*
+ * mdss_mdp_get_secure() - Queries the secure status of a writeback session
+ * @mfd:                   Frame buffer device structure
+ * @enabled:               Pointer to convey if session is secure
+ *
+ * This api enables an entity (userspace process, driver module, etc.) to
+ * query the secure status of a writeback session. The secure status is
+ * then supplied via a pointer.
+ */
 int mdss_mdp_wb_get_secure(struct msm_fb_data_type *mfd, uint8_t *enabled)
 {
 	struct mdss_mdp_wb *wb = mfd_to_wb(mfd);
@@ -143,6 +153,16 @@ int mdss_mdp_wb_get_secure(struct msm_fb_data_type *mfd, uint8_t *enabled)
 	return 0;
 }
 
+/*
+ * mdss_mdp_set_secure() - Updates the secure status of a writeback session
+ * @mfd:                   Frame buffer device structure
+ * @enable:                New secure status (1: secure, 0: non-secure)
+ *
+ * This api enables an entity to modify the secure status of a writeback
+ * session. If enable is 1, we allocate a secure pipe so that MDP is
+ * allowed to write back into the secure buffer. If enable is 0, we
+ * deallocate the secure pipe (if it was allocated previously).
+ */
 int mdss_mdp_wb_set_secure(struct msm_fb_data_type *mfd, int enable)
 {
 	struct mdss_mdp_wb *wb = mfd_to_wb(mfd);
@@ -169,7 +189,7 @@ int mdss_mdp_wb_set_secure(struct msm_fb_data_type *mfd, int enable)
 	ctl->is_secure = enable;
 	wb->is_secure = enable;
 
-	
+	/* newer revisions don't require secure src pipe for secure session */
 	if (ctl->mdata->mdp_rev > MDSS_MDP_HW_REV_100)
 		return 0;
 
@@ -177,7 +197,7 @@ int mdss_mdp_wb_set_secure(struct msm_fb_data_type *mfd, int enable)
 
 	if (!enable) {
 		if (pipe) {
-			
+			/* unset pipe */
 			mdss_mdp_mixer_pipe_unstage(pipe, pipe->mixer_left);
 			mdss_mdp_pipe_destroy(pipe);
 			wb->secure_pipe = NULL;
@@ -370,7 +390,7 @@ static struct mdss_mdp_wb_data *get_local_node(struct mdss_mdp_wb *wb,
 	node->buf_info = *data;
 	buf = &node->buf_data.p[0];
 	buf->addr = (u32) (data->iova + data->offset);
-	buf->len = UINT_MAX; 
+	buf->len = UINT_MAX; /* trusted source */
 	if (wb->is_secure)
 		buf->flags |= MDP_SECURE_OVERLAY_SESSION;
 	ret = mdss_mdp_wb_register_node(wb, node);
@@ -409,13 +429,13 @@ static struct mdss_mdp_wb_data *get_user_node(struct msm_fb_data_type *mfd,
 			pr_err("unable to import fd %d\n", data->memory_id);
 			return NULL;
 		}
-		
+		/* only interested in ptr address, so we can free handle */
 		ion_free(iclient, ihdl);
 
 		list_for_each_entry(node, &wb->register_queue, registered_entry)
 			if ((node->buf_data.p[0].srcp_ihdl == ihdl) &&
 				    (node->buf_info.offset == data->offset)) {
-				pr_debug("found fd=%d hdl=%p off=%x addr=%pa\n",
+				pr_debug("found fd=%d hdl=%pK off=%x addr=%pa\n",
 						data->memory_id, ihdl,
 						data->offset,
 						&node->buf_data.p[0].addr);
@@ -481,7 +501,7 @@ static void mdss_mdp_wb_free_node(struct mdss_mdp_wb_data *node)
 	if (node->user_alloc) {
 		buf = &node->buf_data.p[0];
 
-		pr_debug("free user mem_id=%d ihdl=%p, offset=%u addr=0x%pa\n",
+		pr_debug("free user mem_id=%d ihdl=%pK, offset=%u addr=0x%pa\n",
 				node->buf_info.memory_id,
 				buf->srcp_ihdl,
 				node->buf_info.offset,
@@ -630,7 +650,7 @@ int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd,
 	mutex_lock(&mdss_mdp_wb_buf_lock);
 	if (wb) {
 		mutex_lock(&wb->lock);
-		
+		/* in case of reinit of control path need to reset secure */
 		if (ctl->play_cnt == 0)
 			mdss_mdp_wb_set_secure(ctl->mfd, wb->is_secure);
 		if (!list_empty(&wb->free_queue) && wb->state != WB_STOPING &&
@@ -652,7 +672,7 @@ int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd,
 
 	if (wb_args.data == NULL) {
 		pr_err("unable to get writeback buf ctl=%d\n", ctl->num);
-		
+		/* drop buffer but don't return error */
 		ret = 0;
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_DONE);
 		goto kickoff_fail;
@@ -894,6 +914,13 @@ int msm_fb_writeback_set_secure(struct fb_info *info, int enable)
 }
 EXPORT_SYMBOL(msm_fb_writeback_set_secure);
 
+/**
+ * msm_fb_writeback_iommu_ref() - Add/Remove vote on MDSS IOMMU being attached.
+ * @enable - true adds vote on MDSS IOMMU, false removes the vote.
+ *
+ * Call to vote on MDSS IOMMU being enabled. To ensure buffers are properly
+ * mapped to IOMMU context bank.
+ */
 int msm_fb_writeback_iommu_ref(struct fb_info *info, int enable)
 {
 	int ret;

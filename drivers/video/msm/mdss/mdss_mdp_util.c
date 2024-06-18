@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -300,7 +300,7 @@ int mdss_mdp_get_rau_strides(u32 w, u32 h,
 		} else
 			ps->ystride[1] = 32 * 2;
 
-		
+		/* account for both chroma components */
 		ps->ystride[1] <<= 1;
 	} else if (fmt->fetch_planes == MDSS_MDP_PLANE_INTERLEAVED) {
 		ps->rau_cnt = DIV_ROUND_UP(w, 32);
@@ -419,7 +419,7 @@ int mdss_mdp_get_plane_sizes(u32 format, u32 w, u32 h,
 				ps->num_planes = 2;
 				ps->plane_size[1] *= 2;
 				ps->ystride[1] *= 2;
-			} else { 
+			} else { /* planar */
 				ps->num_planes = 3;
 				ps->plane_size[2] = ps->plane_size[1];
 				ps->ystride[2] = ps->ystride[1];
@@ -489,9 +489,9 @@ void mdss_mdp_data_calc_offset(struct mdss_mdp_data *data, u16 x, u16 y,
 
 		data->p[0].addr += x;
 		data->p[1].addr += xoff + (yoff * ps->ystride[1]);
-		if (data->num_planes == 2) 
+		if (data->num_planes == 2) /* pseudo planar */
 			data->p[1].addr += xoff;
-		else 
+		else /* planar */
 			data->p[2].addr += xoff + (yoff * ps->ystride[2]);
 	}
 }
@@ -507,7 +507,7 @@ static int mdss_mdp_put_img(struct mdss_mdp_img_data *data)
 		pr_debug("pmem buf=0x%pa\n", &data->addr);
 		data->srcp_file = NULL;
 	} else if (!IS_ERR_OR_NULL(data->srcp_ihdl)) {
-		pr_debug("ion hdl=%p buf=0x%pa\n", data->srcp_ihdl,
+		pr_debug("ion hdl=%pK buf=0x%pa\n", data->srcp_ihdl,
 							&data->addr);
 		if (!iclient) {
 			pr_err("invalid ion client\n");
@@ -584,7 +584,7 @@ static int mdss_mdp_get_img(struct msmfb_data *img,
 		data->addr = 0;
 		data->len = 0;
 		data->mapped = false;
-		
+		/* return early, mapping will be done later */
 
 		return 0;
 	}
@@ -599,7 +599,7 @@ static int mdss_mdp_get_img(struct msmfb_data *img,
 		data->addr += data->offset;
 		data->len -= data->offset;
 
-		pr_debug("mem=%d ihdl=%p buf=0x%pa len=0x%lu\n", img->memory_id,
+		pr_debug("mem=%d ihdl=%pK buf=0x%pa len=0x%lu\n", img->memory_id,
 			 data->srcp_ihdl, &data->addr, data->len);
 	} else {
 		mdss_mdp_put_img(data);
@@ -653,7 +653,7 @@ static int mdss_mdp_map_buffer(struct mdss_mdp_img_data *data)
 		data->addr += data->offset;
 		data->len -= data->offset;
 
-		pr_debug("ihdl=%p buf=0x%pa len=0x%lu\n",
+		pr_debug("ihdl=%pK buf=0x%pa len=0x%lu\n",
 			 data->srcp_ihdl, &data->addr, data->len);
 	} else {
 		mdss_mdp_put_img(data);
@@ -733,7 +733,7 @@ int mdss_mdp_calc_phase_step(u32 src, u32 dst, u32 *out_phase)
 	unit = 1 << PHASE_STEP_SHIFT;
 	*out_phase = mult_frac(unit, src, dst);
 
-	
+	/* check if overflow is possible */
 	if ((mdata->mdp_rev < MDSS_MDP_HW_REV_103) && src > dst) {
 		residue = *out_phase - unit;
 		result = (residue * dst) + residue;

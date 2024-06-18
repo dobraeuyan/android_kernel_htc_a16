@@ -56,6 +56,7 @@
 		_SMB358_MASK((LEFT_BIT_POS) - (RIGHT_BIT_POS) + 1, \
 			(RIGHT_BIT_POS))
 
+/* Config/Control registers */
 #define CHG_CURRENT_CTRL_REG		0x0
 #define CHG_OTH_CURRENT_CTRL_REG	0x1
 #define VARIOUS_FUNC_REG		0x2
@@ -76,9 +77,11 @@
 #define AICL_CONTROL_REG	0x2
 #define AICL_ENABLED_BIT	BIT(4)
 
+/* Command registers */
 #define CMD_A_REG			0x30
 #define CMD_B_REG			0x31
 
+/* IRQ status registers */
 #define IRQ_A_REG			0x35
 #define IRQ_B_REG			0x36
 #define IRQ_C_REG			0x37
@@ -90,6 +93,7 @@
 #define IRQ_F_REG			0x3A
 #define IRQ_F_POWER_OK_BIT		BIT(0)
 
+/* Status registers */
 #define STATUS_A_REG			0x3B
 #define STATUS_A_SOFT_LIMIT_BIT	BIT(7)
 #define STATUS_C_REG			0x3D
@@ -110,6 +114,7 @@ enum {
 	TOTAL_IRQ_REG_SEQUENCE
 };
 
+/* Config bits */
 #define CHG_INHI_EN_MASK			BIT(1)
 #define CHG_INHI_EN_BIT				BIT(1)
 #define CMD_A_CHG_ENABLE_BIT			BIT(1)
@@ -133,6 +138,7 @@ enum {
 #define CHG_CTRL_APSD_EN_MASK			BIT(2)
 #define CHG_ITERM_MASK				0x07
 #define CHG_PIN_CTRL_USBCS_REG_BIT		0x0
+/* This is to select if use external pin EN to control CHG */
 #define CHG_PIN_CTRL_CHG_EN_LOW_PIN_BIT		SMB358_MASK(6, 5)
 #define CHG_PIN_CTRL_CHG_EN_LOW_REG_BIT		0x0
 #define CHG_PIN_CTRL_CHG_EN_MASK		SMB358_MASK(6, 5)
@@ -163,6 +169,7 @@ enum {
 #define THERM_A_THERM_MONITOR_EN_MASK		BIT(4)
 #define VFLOAT_MASK				0x3F
 
+/* IRQ status bits */
 #define IRQ_A_HOT_HARD_BIT			BIT(6)
 #define IRQ_A_COLD_HARD_BIT			BIT(4)
 #define IRQ_A_HOT_SOFT_BIT			BIT(2)
@@ -187,6 +194,7 @@ enum {
 #define IRQ_F_OTG_OC_BIT			BIT(6)
 #define IRQ_F_POWER_OK				BIT(0)
 
+/* Status  bits */
 #define CHG_STATUS_SHIFT				1
 #define STATUS_C_CHARGING_MASK			SMB358_MASK(2, 1)
 #define STATUS_C_FAST_CHARGING			BIT(2)
@@ -206,6 +214,7 @@ enum {
 #define STATUS_D_PORT_ACA_B			SMB358_MASK(2, 1)
 #define STATUS_D_PORT_ACA_C			SMB358_MASK(2, 0)
 
+/* constants */
 #define USB2_MIN_CURRENT_MA		100
 #define USB2_MAX_CURRENT_MA		500
 #define USB3_MIN_CURRENT_MA		150
@@ -274,12 +283,12 @@ struct smb358_charger {
 	unsigned int		cool_bat_mv;
 	unsigned int		warm_bat_mv;
 
-	
+	/* debugfs related */
 #if defined(CONFIG_DEBUG_FS)
 	struct dentry		*debug_root;
 	u32			peek_poke_address;
 #endif
-	
+	/* status tracking */
 	bool			batt_full;
 	bool			batt_hot;
 	bool			batt_cold;
@@ -289,15 +298,15 @@ struct smb358_charger {
 	int			charging_disabled_status;
 	int			usb_suspended;
 
-	
+	/* power supply */
 	struct power_supply	*usb_psy;
 	struct power_supply	*bms_psy;
 	struct power_supply	batt_psy;
 
-	
+	/* otg 5V regulator */
 	struct smb358_regulator	otg_vreg;
 
-	
+	/* adc_tm paramters */
 	struct qpnp_vadc_chip	*vadc_dev;
 	struct qpnp_adc_tm_chip	*adc_tm_dev;
 	struct qpnp_adc_tm_btm_param	adc_param;
@@ -306,7 +315,7 @@ struct smb358_charger {
 	int			cool_bat_decidegc;
 	int			warm_bat_decidegc;
 	int			bat_present_decidegc;
-	
+	/* i2c pull up regulator */
 	struct regulator	*vcc_i2c;
 	enum htc_ftm_power_source_type	ftm_src;
 #if defined(CONFIG_HTC_BATT_GPIO_OVP)
@@ -364,29 +373,38 @@ static void smb358_idic_detection(struct smb358_charger *chip);
 static int64_t read_vbus_voltage(struct smb358_charger *chip);
 void smb358_set_charger_configuration(void);
 bool smb358_is_hw_reload_happened(struct smb358_charger *chip);
+/* global variables */
+/* 1.Disable temp protect. 2.Skip safety timer. */
 static bool flag_keep_charge_on;
+/* Fake cable type to AC for ATS testing. */
 static bool flag_force_ac_chg;
+/* Fake battery temperature not over 68 degree for PA testing. */
 static bool flag_pa_fake_batt_temp;
+/* Disable safety timer */
 static bool flag_disable_safety_timer;
+/* Disable battery temperature hot/cold protection*/
 static bool flag_disable_temp_protection;
+/* Dump BMS and Charger debug log*/
 static bool flag_enable_bms_charger_log;
 static int test_power_monitor;
 static int test_ftm_mode;
 static int test_download_mode;
 static int hsml_target_ma;
+/* latest ov/uv rt state */
 static int ovp = false;
 static int uvp = false;
 #if defined(CONFIG_HTC_BATT_GPIO_OVP)
+/* latest external OVP value */
 static int start_ovp = 1;
 #endif
 static bool is_batt_full = false;
 static bool is_batt_full_eoc_stop = false;
-static int eoc_count; 
-static int eoc_count_by_curr; 
+static int eoc_count; /* used in eoc_worker() */
+static int eoc_count_by_curr; /* used in eoc_worker() */
 static bool is_ac_safety_timeout = false;
-static unsigned int chg_limit_current; 
+static unsigned int chg_limit_current; /* set from other drivers*/
 
-static bool first_vbus_irq = true; 
+static bool first_vbus_irq = true; /* to ensure fake_chg_uv_irq is first vbus irq*/
 static int iusb_limit_reason;
 static bool iusb_limit_enable = false;
 static int retry_aicl_cnt = 0;
@@ -416,6 +434,7 @@ static unsigned long dischg_last_time_ms;
 static bool is_limit_IUSB = false;
 
 #ifndef CONFIG_HTC_BATT_8960
+/* add supplied to "bms" function */
 static char *pm_batt_supplied_to[] = {
 	"bms",
 };
@@ -502,7 +521,7 @@ static int smb358_read_bytes(struct smb358_charger *chip, int reg,
 
 	return (rc < 0) ? rc : 0;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static int smb358_write_reg(struct smb358_charger *chip, int reg,
 						u8 val)
@@ -789,7 +808,7 @@ static int smb358_regulator_init(struct smb358_charger *chip)
 		return -ENOMEM;
 	}
 
-	
+	/* Give the name, then will register */
 	if (init_data->constraints.name) {
 		chip->otg_vreg.rdesc.owner = THIS_MODULE;
 		chip->otg_vreg.rdesc.type = REGULATOR_VOLTAGE;
@@ -854,7 +873,7 @@ static int smb358_charging_disable(struct smb358_charger *chip,
 		pr_err("Failed to disable charging rc = %d\n", rc);
 		return rc;
 	} else {
-	
+	/* will not modify online status in this condition */
 #ifndef CONFIG_HTC_BATT_8960
 		power_supply_changed(&chip->batt_psy);
 #endif
@@ -865,7 +884,8 @@ skip:
 	return rc;
 }
 #else
-static int batt_charging_disabled; 
+static int batt_charging_disabled; /* BAT FET side */
+/* sw disabled batt fet control mask (reason) */
 #define BATT_CHG_DISABLED_BIT_EOC	(1)
 #define BATT_CHG_DISABLED_BIT_KDRV	(1<<1)
 #define BATT_CHG_DISABLED_BIT_USR	(1<<2)
@@ -873,6 +893,7 @@ static int batt_charging_disabled;
 #define BATT_CHG_DISABLED_BIT_BAT	(1<<4)
 #define BATT_CHG_DISABLED_BIT_SAFETY (1<<5)
 
+/* htc: to protect BAT_FET sw enable/disable contorl */
 static int smb358_chg_disable_charger(struct smb358_charger *chip,
 		int disable, int reason)
 {
@@ -881,9 +902,9 @@ static int smb358_chg_disable_charger(struct smb358_charger *chip,
 	pr_info("disable=%d, reason=0x%X\n", disable, reason);
 	mutex_lock(&chip->charging_disable_lock);
 	if (disable)
-		batt_charging_disabled |= reason;	
+		batt_charging_disabled |= reason;	/* set bit */
 	else
-		batt_charging_disabled &= ~reason;	
+		batt_charging_disabled &= ~reason;	/* clr bit */
 	rc = __smb358_charging_disable(chip, !!batt_charging_disabled);
 	if (rc)
 		pr_err("Failed rc=%d\n", rc);
@@ -891,13 +912,17 @@ static int smb358_chg_disable_charger(struct smb358_charger *chip,
 
 	return rc;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static int smb358_hw_init(struct smb358_charger *chip)
 {
 	int rc;
 	u8 reg = 0, mask = 0;
 
+	/*
+	 * If the charger is pre-configured for autonomous operation,
+	 * do not apply additonal settings
+	 */
 	if (chip->chg_autonomous_mode) {
 		pr_debug("Charger configured for autonomous mode\n");
 		return 0;
@@ -910,7 +935,7 @@ static int smb358_hw_init(struct smb358_charger *chip)
 		return rc;
 	}
 
-	
+	/* setup defaults for CHG_CNTRL_REG */
 	reg = CHG_CTRL_BATT_MISSING_DET_THERM_IO;
 	mask = CHG_CTRL_BATT_MISSING_DET_MASK;
 	rc = smb358_masked_write(chip, CHG_CTRL_REG, mask, reg);
@@ -918,7 +943,7 @@ static int smb358_hw_init(struct smb358_charger *chip)
 		dev_err(chip->dev, "Couldn't set CHG_CTRL_REG rc=%d\n", rc);
 		return rc;
 	}
-	
+	/* setup defaults for PIN_CTRL_REG */
 	reg = CHG_PIN_CTRL_USBCS_REG_BIT | CHG_PIN_CTRL_CHG_EN_LOW_REG_BIT |
 		CHG_PIN_CTRL_APSD_IRQ_BIT | CHG_PIN_CTRL_CHG_ERR_IRQ_BIT;
 	mask = CHG_PIN_CTRL_CHG_EN_MASK | CHG_PIN_CTRL_USBCS_REG_MASK |
@@ -930,7 +955,7 @@ static int smb358_hw_init(struct smb358_charger *chip)
 		return rc;
 	}
 
-	
+	/* setup USB suspend and APSD  */
 	rc = smb358_masked_write(chip, VARIOUS_FUNC_REG,
 		VARIOUS_FUNC_USB_SUSP_MASK, VARIOUS_FUNC_USB_SUSP_EN_REG_BIT);
 	if (rc) {
@@ -951,7 +976,7 @@ static int smb358_hw_init(struct smb358_charger *chip)
 				rc);
 		return rc;
 	}
-	
+	/* Fault and Status IRQ configuration */
 	reg = FAULT_INT_HOT_COLD_HARD_BIT | FAULT_INT_HOT_COLD_SOFT_BIT
 		| FAULT_INT_INPUT_UV_BIT | FAULT_INT_AICL_COMPLETE_BIT
 		| FAULT_INT_INPUT_OV_BIT;
@@ -969,7 +994,7 @@ static int smb358_hw_init(struct smb358_charger *chip)
 		dev_err(chip->dev, "Couldn't set STATUS_INT_REG rc=%d\n", rc);
 		return rc;
 	}
-	
+	/* setup THERM Monitor */
 	rc = smb358_masked_write(chip, THERM_A_CTRL_REG,
 		THERM_A_THERM_MONITOR_EN_MASK, THERM_A_THERM_MONITOR_EN_BIT);
 	if (rc) {
@@ -977,14 +1002,14 @@ static int smb358_hw_init(struct smb358_charger *chip)
 				rc);
 		return rc;
 	}
-	
+	/* set the fast charge current limit */
 	rc = smb358_fastchg_current_set(chip, chip->fastchg_current_max_ma);
 	if (rc) {
 		dev_err(chip->dev, "Couldn't set fastchg current rc=%d\n", rc);
 		return rc;
 	}
 
-	
+	/* set the float voltage */
 	rc = smb358_float_voltage_set(chip, chip->vfloat_mv);
 	if (rc < 0) {
 		dev_err(chip->dev,
@@ -992,17 +1017,17 @@ static int smb358_hw_init(struct smb358_charger *chip)
 		return rc;
 	}
 
-	
+	/* set iterm */
 	rc = smb358_term_current_set(chip);
 	if (rc)
 		dev_err(chip->dev, "Couldn't set term current rc=%d\n", rc);
 
-	
+	/* set recharge */
 	rc = smb358_recharge_and_inhibit_set(chip);
 	if (rc)
 		dev_err(chip->dev, "Couldn't set recharge para rc=%d\n", rc);
 
-	
+	/* enable/disable charging */
 	if (chip->charging_disabled) {
 #ifndef CONFIG_HTC_BATT_8960
 		rc = smb358_charging_disable(chip, USER, 1);
@@ -1014,20 +1039,32 @@ static int smb358_hw_init(struct smb358_charger *chip)
 			dev_err(chip->dev, "Couldn't '%s' charging rc = %d\n",
 			chip->charging_disabled ? "disable" : "enable", rc);
 	} else {
+		/*
+		 * Enable charging explictly,
+		 * because not sure the default behavior.
+		 */
 		rc = __smb358_charging_disable(chip, 0);
 		if (rc)
 			dev_err(chip->dev, "Couldn't enable charging\n");
 	}
 
+	/*
+	* Workaround for recharge frequent issue: When battery is
+	* greater than 4.2v, and charging is disabled, charger
+	* stops switching. In such a case, system load is provided
+	* by battery rather than input, even though input is still
+	* there. Make reg09[0:3] to be a non-zero value which can
+	* keep the switcher active
+	*/
 	rc = smb358_masked_write(chip, OTHER_CTRL_REG, CHG_LOW_BATT_THRESHOLD,
 						SMB358_BATT_GOOD_THRE_2P5);
 	if (rc)
 		dev_err(chip->dev, "Couldn't write OTHER_CTRL_REG, rc = %d\n",
 								rc);
 #ifdef CONFIG_HTC_BATT_8960
-	
+	/* disable safety timer if debug flag 6 4 or 6 2000 is set */
 	if (chip->safety_time == 0 || flag_keep_charge_on || flag_disable_safety_timer) {
-		
+		/* safety timer disabled */
 		rc = smb358_masked_write(chip, CFG_SFY_TIMER_CTRL_REG,
 				SAFETY_TIME_MINUTES_MASK, SAFETY_TIME_DISABLE_BIT);
 		if (rc)
@@ -1171,7 +1208,7 @@ static int smb358_get_prop_batt_health(struct smb358_charger *chip)
 
 	return ret.intval;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static int
 smb358_get_prop_battery_voltage_now(struct smb358_charger *chip)
@@ -1255,6 +1292,7 @@ static int smb358_path_suspend(struct smb358_charger *chip, int reason,
 	return rc;
 }
 #else
+/* sw disabled vbus power source control mask (reason) */
 #define PWRSRC_DISABLED_BIT_KDRV	(1)
 #define PWRSRC_DISABLED_BIT_USER	(1<<1)
 #define PWRSRC_DISABLED_BIT_AICL	(1<<2)
@@ -1262,7 +1300,7 @@ static int smb358_path_suspend(struct smb358_charger *chip, int reason,
 #define PWRSRC_DISABLED_BIT_EOC		(1<<4)
 #define PWRSRC_DISABLED_BIT_IDIC	(1<<5)
 
-static int pwrsrc_disabled; 
+static int pwrsrc_disabled; /* USBIN side */
 
 static int smb358_chg_disable_pwrsrc(struct smb358_charger *chip,
 		int disable, int reason)
@@ -1272,9 +1310,9 @@ static int smb358_chg_disable_pwrsrc(struct smb358_charger *chip,
 	pr_info("disable=%d, reason=0x%X\n", disable, reason);
 	mutex_lock(&chip->path_suspend_lock);
 	if (disable)
-		pwrsrc_disabled |= reason;	
+		pwrsrc_disabled |= reason;	/* set bit */
 	else
-		pwrsrc_disabled &= ~reason;	
+		pwrsrc_disabled &= ~reason;	/* clr bit */
 	rc = __smb358_path_suspend(chip, !!pwrsrc_disabled);
 	if (rc)
 		pr_err("Failed rc=%d\n", rc);
@@ -1282,7 +1320,7 @@ static int smb358_chg_disable_pwrsrc(struct smb358_charger *chip,
 
 	return rc;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static int smb358_set_usb_chg_current(struct smb358_charger *chip,
 		int current_ma)
@@ -1301,19 +1339,19 @@ static int smb358_set_usb_chg_current(struct smb358_charger *chip,
 		current_ma = USB2_MIN_CURRENT_MA;
 
 	if (current_ma == USB2_MIN_CURRENT_MA) {
-		
+		/* USB 2.0 - 100mA */
 		reg1 &= ~USB3_ENABLE_BIT;
 		reg2 &= ~CMD_B_CHG_USB_500_900_ENABLE_BIT;
 	} else if (current_ma == USB2_MAX_CURRENT_MA) {
-		
+		/* USB 2.0 - 500mA */
 		reg1 &= ~USB3_ENABLE_BIT;
 		reg2 |= CMD_B_CHG_USB_500_900_ENABLE_BIT;
 	} else if (current_ma == USB3_MAX_CURRENT_MA) {
-		
+		/* USB 3.0 - 900mA */
 		reg1 |= USB3_ENABLE_BIT;
 		reg2 |= CMD_B_CHG_USB_500_900_ENABLE_BIT;
 	} else if (current_ma > USB2_MAX_CURRENT_MA) {
-		
+		/* HC mode  - if none of the above */
 		reg2 |= CMD_B_CHG_HC_ENABLE_BIT;
 
 		for (i = ARRAY_SIZE(chg_current) - 1; i >= 0; i--) {
@@ -1345,7 +1383,7 @@ static int smb358_set_usb_chg_current(struct smb358_charger *chip,
 		dev_err(chip->dev, "Couldn't set USB3 mode rc = %d\n", rc);
 
 #ifndef CONFIG_HTC_BATT_8960
-	
+	/* Only set suspend bit when chg present and current_ma = 2 */
 	if (current_ma == 2 && chip->chg_present) {
 		rc = smb358_path_suspend(chip, CURRENT, true);
 		if (rc < 0)
@@ -1492,7 +1530,7 @@ static int smb358_battery_get_property(struct power_supply *psy,
 	}
 	return 0;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static int safety_timeout(struct smb358_charger *chip, u8 status)
 {
@@ -1516,21 +1554,21 @@ static int downgrade_aicl_result(struct smb358_charger *chip, int mA)
 
 	pr_info("re-run AICL by %dmA\n", mA);
 
-	
+	/* disable AICL before change input current limit*/
 	rc = smb358_chg_aicl_enable(chip, false);
 	if (rc < 0) {
 		pr_err("enable/disable AICL failed rc=%d\n", rc);
 		return rc;
 	}
 
-	
+	/* set maximum input current limit */
 	rc = smb358_set_usb_chg_current(chip, mA);
 	if (rc < 0) {
 		pr_err("set usb chg current fail rc=%d\n", rc);
 		return rc;
 	}
 
-	
+	/* enable AICL after change input current limit*/
 	rc = smb358_chg_aicl_enable(chip, true);
 	if (rc < 0) {
 		pr_err("enable/disable AICL failed rc=%d\n", rc);
@@ -1549,7 +1587,7 @@ static void retry_aicl_worker(struct work_struct *work)
 	downgrade_aicl_result(chip, USB_MA_1500);
 	retry_aicl_cnt++;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 #define RETRY_AICL_TOTAL	2
 #define RETRY_AICL_INTERVAL_MS	180000
@@ -1570,7 +1608,7 @@ static int aicl_complete(struct smb358_charger *chip, u8 status)
 			aicl_done, status, aicl_result, reg, usbin);
 
 #ifdef CONFIG_HTC_BATT_8960
-	
+	/* limit IUSB_MAX as 1A */
 	if ((status & IRQ_D_AICL_DONE_BIT) && aicl_done && is_ac_online()) {
 		if (aicl_result == USB_MA_1200) {
 			downgrade_aicl_result(chip, USB_MA_1000);
@@ -1579,7 +1617,7 @@ static int aicl_complete(struct smb358_charger *chip, u8 status)
 			downgrade_aicl_result(chip, USB_MA_1000);
 		} else if (aicl_result <= USB_MA_500  &&
 				retry_aicl_cnt < RETRY_AICL_TOTAL) {
-			
+			/* retry 1.5A AICL for AC cable */
 			if (delayed_work_pending(&chip->retry_aicl_work))
 				cancel_delayed_work_sync(&chip->retry_aicl_work);
 			pr_info("Trigger re-run AICL after 3 minutes, cnt=%d\n", retry_aicl_cnt);
@@ -1588,11 +1626,11 @@ static int aicl_complete(struct smb358_charger *chip, u8 status)
 		}
 		if (aicl_result < USB_MA_500 &&
 				retry_aicl_cnt == RETRY_AICL_TOTAL) {
-			
+			/*Set the bad AICL flag*/
 			gs_is_bad_aicl_result = true;
 		}
 	}
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 	return 0;
 }
@@ -1604,6 +1642,12 @@ static int apsd_complete(struct smb358_charger *chip, u8 status)
 	enum power_supply_type type = POWER_SUPPLY_TYPE_UNKNOWN;
 
 	pr_info("status = 0x%02x\n", status);
+	/*
+	 * If apsd is disabled, charger detection is done by
+	 * DCIN UV irq.
+	 * status = ZERO - indicates charger removed, handled
+	 * by DCIN UV irq
+	 */
 	if (chip->disable_apsd || status == 0) {
 		pr_info("APSD %s, status = %d\n",
 			chip->disable_apsd ? "disabled" : "enabled", !!status);
@@ -1649,7 +1693,7 @@ static int apsd_complete(struct smb358_charger *chip, u8 status)
 #ifndef CONFIG_HTC_BATT_8960
 	power_supply_set_charge_type(chip->usb_psy, type);
 
-	 
+	 /* SMB is now done sampling the D+/D- lines, indicate USB driver */
 	pr_info("%s updating usb_psy present=%d", __func__,
 			chip->chg_present);
 	power_supply_set_present(chip->usb_psy, chip->chg_present);
@@ -1686,7 +1730,7 @@ static int chg_uv(struct smb358_charger *chip, u8 status)
 			chip->chg_present, !!!status, status, usbin, is_limit_IUSB);
 
 #ifndef CONFIG_HTC_BATT_8960
-	
+	/* use this to detect USB insertion only if !apsd */
 	if (chip->disable_apsd && status == 0) {
 		chip->chg_present = true;
 		pr_info("%s updating usb_psy present=%d",
@@ -1696,6 +1740,10 @@ static int chg_uv(struct smb358_charger *chip, u8 status)
 		power_supply_set_present(chip->usb_psy, chip->chg_present);
 
 		if (chip->bms_controlled_charging) {
+			/*
+			* Disable SOC based USB suspend to enable charging on
+			* USB insertion.
+			*/
 #ifndef CONFIG_HTC_BATT_8960
 			rc = smb358_charging_disable(chip, SOC, false);
 #else
@@ -1713,14 +1761,14 @@ static int chg_uv(struct smb358_charger *chip, u8 status)
 		chip->chg_present = false;
 		pr_info("%s updating usb_psy present=%d",
 				__func__, chip->chg_present);
-	
+	/* we can't set usb_psy as UNKNOWN here, will lead USERSPACE issue */
 
 		power_supply_set_present(chip->usb_psy, chip->chg_present);
 	}
 	power_supply_changed(chip->usb_psy);
 
 	pr_info("chip->chg_present = %d\n", chip->chg_present);
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 	if (first_vbus_irq) {
 		pr_info("Run before BMS init!! Do Nothing.\n");
@@ -1735,16 +1783,16 @@ static int chg_uv(struct smb358_charger *chip, u8 status)
 		cable_in = 1;
 
 	if ((prev_cable_in == 1) && (cable_in == 0)) {
-		
+		//charging --> discharging
 		dischg_last_time_ms = cur_time_ms;
 		dischg_time_ms = 0;
 		first = false;
 	} else if ((!first) && (prev_cable_in == 0) && (cable_in == 1)){
-		
+		//discharging --> charging
 		dischg_time_ms = cur_time_ms - dischg_last_time_ms;
 
-		
-		
+		//if two dichg time is very close (less than 1 second)
+		//And it continuously added to 3, set IUSB_MAX as 1A.
 		diff = dischg_time_ms - prev_dischg_time_ms;
 
 		pr_info("status = %d. "
@@ -1838,7 +1886,7 @@ static int chg_term(struct smb358_charger *chip, u8 status)
 			smb358_idic_detection(chip);
 		is_batt_full_eoc_stop = is_batt_full = true;
 		htc_gauge_event_notify(HTC_GAUGE_EVENT_EOC_STOP_CHG);
-		
+		/* disable pwrsrc after eoc */
 		if (is_hv_battery && !flag_keep_charge_on)
 			smb358_chg_disable_pwrsrc(chip, true,
 							PWRSRC_DISABLED_BIT_EOC);
@@ -1864,7 +1912,7 @@ static int chg_recharge(struct smb358_charger *chip, u8 status)
 	if(is_batt_full && (status & IRQ_C_RECHARGE_BIT)) {
 		is_batt_full_eoc_stop = false;
 	}
-	
+	/* to check the status mean */
 	chip->batt_full = !status;
 	return 0;
 }
@@ -2016,7 +2064,7 @@ static void smb_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 			bat_present = true;
 			chip->adc_param.high_temp =
 				chip->cold_bat_decidegc + HYSTERESIS_DECIDEGC;
-			
+			/* add low_temp to enable batt present check */
 			chip->adc_param.low_temp =
 				chip->bat_present_decidegc;
 			chip->adc_param.state_request =
@@ -2074,7 +2122,7 @@ static void smb_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 	if (bat_hot ^ chip->batt_hot || bat_cold ^ chip->batt_cold) {
 		chip->batt_hot = bat_hot;
 		chip->batt_cold = bat_cold;
-		
+		/* stop charging explicitly since we use PMIC thermal pin*/
 		if (bat_hot || bat_cold || chip->battery_missing)
 #ifndef CONFIG_HTC_BATT_8960
 			smb358_charging_disable(chip, THERMAL, 1);
@@ -2114,6 +2162,7 @@ static void smb_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 		pr_err("request ADC error\n");
 }
 
+/* only for SMB thermal */
 #ifndef CONFIG_HTC_BATT_8960
 static int hot_hard_handler(struct smb358_charger *chip, u8 status)
 {
@@ -2146,7 +2195,7 @@ static int battery_missing(struct smb358_charger *chip, u8 status)
 	chip->battery_missing = !!status;
 	return 0;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 static struct irq_handler_info handlers[] = {
 	[0] = {
@@ -2325,7 +2374,7 @@ static irqreturn_t smb358_chg_stat_handler(int irq, void *dev_id)
 				handler_count++;
 				rc = handlers[i].irq_info[j].smb_irq(chip,
 								rt_stat);
-				
+				/* if irq is taper, do not print the log due to it is too much */
 				if (!((i == IRQ_C_REG_SEQUENCE && (IRQ_STATUS_MASK << (j * BITS_PER_IRQ)) == IRQ_C_TAPER_CHG_BIT))) {
 					pr_info("IRQ 0x%02X reg =0x%02X, %s irq is triggered=0x%02X, rt_stat=0x%02X, changed=0x%02X\n",
 							handlers[i].stat_reg, handlers[i].val,
@@ -2524,7 +2573,7 @@ int smb358_is_pwr_src_plugged_in(void)
 	int ov = false, uv = false, v = false;
 	int rc = 0;
 
-	
+	/* Check if called before init */
 	if (!the_chip) {
 		pr_warn("called before init\n");
 		return -EINVAL;
@@ -2537,7 +2586,7 @@ int smb358_is_pwr_src_plugged_in(void)
 	}
 
 	if (uv) {
-		
+		//Delay 100ms to double confirm chgr UV status
 		mdelay(100);
 		rc = get_prop_usb_valid_status(the_chip, &ov, &v, &uv);
 		if (rc < 0) {
@@ -2552,7 +2601,7 @@ EXPORT_SYMBOL(smb358_is_pwr_src_plugged_in);
 
 static u32 htc_fake_charger_for_testing(enum htc_power_source_type src)
 {
-	
+	/* set charger to 1A AC  by default */
 	enum htc_power_source_type new_src = HTC_PWR_SOURCE_TYPE_AC;
 
 	if((src > HTC_PWR_SOURCE_TYPE_9VAC) || (src == HTC_PWR_SOURCE_TYPE_BATT))
@@ -2568,7 +2617,7 @@ static int smb358_enable_cmd_register_control(struct smb358_charger *chip)
 	u8 reg = 0;
 	u8 mask = 0;
 
-	
+	/* setup defaults for PIN_CTRL_REG */
 	reg = CHG_PIN_CTRL_USBCS_REG_BIT | CHG_PIN_CTRL_CHG_EN_LOW_REG_BIT |
 		CHG_PIN_CTRL_APSD_IRQ_BIT | CHG_PIN_CTRL_CHG_ERR_IRQ_BIT;
 	mask = CHG_PIN_CTRL_CHG_EN_MASK | CHG_PIN_CTRL_USBCS_REG_MASK |
@@ -2600,26 +2649,26 @@ static void handle_usb_present_change(struct smb358_charger *chip,
 		is_ac_safety_timeout = false;
 
 		if (!chg_present) {
-			
+			/* Store battery data in Emmc when unplug cable in off mode charging. */
 			if (!strcmp(htc_get_bootmode(), "offmode_charging"))
 				pm8909_bms_store_battery_data_emmc();
 
-			
+			/* to clear sw eoc flag once plug in/out cable*/
 			eoc_count_by_curr = eoc_count = 0;
 			is_batt_full = false;
 			is_batt_full_eoc_stop = false;
-			
+			/* clear batfet_dis/pwrsrc_dis eoc flag after unplug cable*/
 			if (!flag_keep_charge_on)
 				smb358_set_charger_after_eoc(true);
 			memset(vbat_sample, 0, sizeof(vbat_sample));
 			is_idic_detect_done = false;
 			hsml_target_ma = 0;
-			
+			/* Cancel retry_aicl_worker */
 			if (delayed_work_pending(&chip->retry_aicl_work))
 				cancel_delayed_work_sync(&chip->retry_aicl_work);
 			retry_aicl_cnt = 0;
 			gs_is_bad_aicl_result = false;
-			
+			/* Cancel smb_358_eoc_work */
 			if (delayed_work_pending(&chip->eoc_work))
 				cancel_delayed_work_sync(&chip->eoc_work);
 			schedule_delayed_work(&chip->eoc_work, msecs_to_jiffies(0));
@@ -2628,7 +2677,7 @@ static void handle_usb_present_change(struct smb358_charger *chip,
 		}
 	}
 
-	
+	/*Check iusb_limit_enable reason*/
 	if (chg_present && iusb_limit_enable)
 		smb358_limit_input_current(
 			iusb_limit_enable, iusb_limit_reason);
@@ -2641,30 +2690,30 @@ void smb358_set_charger_configuration(void)
 
 	smb358_enable_volatile_writes(chip);
 
-	
+	/* STEP0: switch smb358 PIN_CTRL to I2C_CTRL*/
 	smb358_enable_cmd_register_control(chip);
 
-	
+	/* STEP1: set maximum input current limit */
 	smb358_set_usb_chg_current(chip, mA);
 
-	
+	/* STEP2: set fast-chg battery current */
 	smb358_chg_set_appropriate_battery_current(chip);
 
-	
+	/* STEP3: set charger vddmax */
 	smb358_chg_set_appropriate_vddmax(chip);
 
-	
+	/* STEP4: set BATFET */
 	smb358_chg_disable_charger(chip, !chg_enable_status,
 								BATT_CHG_DISABLED_BIT_KDRV);
 
-	
+	/* STEP5: set pwrsrc enable/disable */
 	smb358_chg_disable_pwrsrc(chip, !pwrsrc_enable_status,
 								PWRSRC_DISABLED_BIT_KDRV);
 
-	
+	/* STEP6: set charger recharging threshold */
 	smb358_chg_recharge_threshold_set(chip);
 
-	
+	/* STEP7: disable/enable safety timer by cable type */
 	smb358_chg_safety_timer_set(chip);
 
 	return;
@@ -2757,7 +2806,7 @@ int smb358_set_pwrsrc_and_charger_enable(enum htc_power_source_type src,
 		return -EINVAL;
 	}
 
-	
+	/*Clear the bad AICL flag when ever power source change*/
 	gs_is_bad_aicl_result = false;
 
 	pr_info("src=%d, pre_pwr_src=%d, chg_enable=%d, pwrsrc_enable=%d, ftm_src=%d\n",
@@ -2781,7 +2830,7 @@ int smb358_set_pwrsrc_and_charger_enable(enum htc_power_source_type src,
 	case HTC_PWR_SOURCE_TYPE_UNKNOWN_USB:
 	case HTC_PWR_SOURCE_TYPE_CABLE_INSERT:
 	case HTC_PWR_SOURCE_TYPE_USB:
-		
+		/*FIXME: WA due to USB cable type is incorrect*/
 		if (chip->ftm_src == HTC_FTM_PWR_SOURCE_TYPE_AC)
 			mA = USB_MA_1000;
 		else
@@ -2952,11 +3001,11 @@ static void dump_charger_regs(struct smb358_charger *chip)
 	memset(cmd_regs, 0, sizeof(cmd_regs));
 	memset(status_regs, 0, sizeof(status_regs));
 
-	
+	/* Charger register: 00h ~ 13h */
 	smb358_read_bytes(chip, FIRST_CNFG_REG, config_regs, sizeof(config_regs));
-	
+	/* Command register: 30h ~ 33h */
 	smb358_read_bytes(chip, FIRST_CMD_REG, cmd_regs, sizeof(cmd_regs));
-	
+	/* status register: 35h ~ 3Fh */
 	smb358_read_bytes(chip, FIRST_STATUS_REG, status_regs, sizeof(status_regs));
 
 	printk(KERN_INFO "[BATT][SMB] CONFIG_REG<00h~13h>:"
@@ -3036,6 +3085,7 @@ int smb358_dump_all(void)
 	return 0;
 }
 
+/*Decide to show lightning on charging icon or not*/
 int smb358_is_batt_temp_fault_disable_chg(int *result)
 {
 	int vbat_mv, is_vbatt_over_vddmax;
@@ -3070,6 +3120,7 @@ int smb358_is_batt_temp_fault_disable_chg(int *result)
 	return 0;
 }
 
+/*Decide to blink charging amber LED or not*/
 int smb358_is_batt_temperature_fault(int *result)
 {
 	int is_cold = 0, is_warm = 0, is_hot = 0;
@@ -3099,7 +3150,7 @@ static void update_ovp_uvp_state(int ov, int v, int uv)
 			ovp = 1;
 			pr_info("OVP: 0 -> 1, USB_Valid: %d\n", v);
 			htc_charger_event_notify(HTC_CHARGER_EVENT_OVP);
-			
+			/*Inform USB driver to clear chg_src*/
 			cable_detection_vbus_irq_handler();
 		}
 		if (uvp) {
@@ -3117,12 +3168,12 @@ static void update_ovp_uvp_state(int ov, int v, int uv)
 			pr_debug("UVP: 0 -> 1, USB_Valid: %d\n", v);
 		}
 	} else {
-		
+		/*(!ov && v && !uv) condition*/
 		if (ovp) {
 			ovp = 0;
 			pr_info("OVP: 1 -> 0, USB_Valid: %d\n", v);
 			htc_charger_event_notify(HTC_CHARGER_EVENT_OVP_RESOLVE);
-			
+			/*Inform USB driver to re-detect chg_src*/
 			cable_detection_vbus_irq_handler();
 		}
 		if (uvp) {
@@ -3210,6 +3261,7 @@ static int smb358_chg_is_taper(struct smb358_charger *chip)
 #define VBAT_TOLERANCE_MV	70
 #define CONSECUTIVE_COUNT	3
 #define CLEAR_FULL_STATE_BY_LEVEL_THR	95
+/* MSM8909 battery current is not accurate */
 #define LOW_CURRENT_TOLERANCE	10
 static void
 smb358_eoc_work(struct work_struct *work)
@@ -3247,19 +3299,19 @@ smb358_eoc_work(struct work_struct *work)
 	if (smb358_is_fastchg_on(chip)) {
 		is_batt_full_eoc_stop = false;
 		if (!smb358_chg_is_taper(chip)) {
-			
+			/* battery is still in CC mode */
 			eoc_count_by_curr = eoc_count = 0;
 		} else if (ibat_ma > (0 + LOW_CURRENT_TOLERANCE)) {
-			
+			/* battery is discharging or vm_bms daemon not ready*/
 			eoc_count_by_curr = eoc_count = 0;
 		} else if (vbat_mv < (chip->vfloat_mv - VBAT_TOLERANCE_MV)) {
-			
+			/* battery voltage is not high enough */
 			eoc_count_by_curr = eoc_count = 0;
 		} else if ((ibat_ma * -1) > chip->batt_full_criteria) {
-			
+			/* charging current >= batt_full_criteria criterion */
 			eoc_count_by_curr = eoc_count = 0;
 		} else if ((ibat_ma * -1) > chip->iterm_ma) {
-			
+			/* iterm_ma criterion < charging current */
 			eoc_count_by_curr = 0;
 			eoc_count++;
 
@@ -3269,11 +3321,11 @@ smb358_eoc_work(struct work_struct *work)
 			}
 		} else {
 			eoc_count++;
-			
+			/* charging current < iterm_ma criterion */
 			if (eoc_count_by_curr == CONSECUTIVE_COUNT) {
 				pr_info("End of Charging\n");
 				is_batt_full_eoc_stop = true;
-				
+				/* disable pwrsrc after eoc */
 				if (is_hv_battery && !flag_keep_charge_on)
 					smb358_chg_disable_pwrsrc(chip, true,
 									PWRSRC_DISABLED_BIT_EOC);
@@ -3287,10 +3339,14 @@ smb358_eoc_work(struct work_struct *work)
 			}
 		}
 
+		/* Check if overloading is happened after full charging.
+		If CLEAR_FULL_STATE_BY_LEVEL_THR is set too high(99),
+		you might meet soc can't report higher soc due to
+		start_percent is -22 even if overloading status has been removed. */
 		if (is_batt_full) {
 			pm8909_get_batt_soc(&soc);
 			if (soc <= CLEAR_FULL_STATE_BY_LEVEL_THR) {
-				
+				/* We add one more condition to check overloading */
 				if (chip->vfloat_mv &&
 					(vbat_mv > (chip->vfloat_mv - 100))) {
 					pr_info("Not satisfy overloading battery voltage"
@@ -3310,7 +3366,7 @@ smb358_eoc_work(struct work_struct *work)
 				&& (chg_state & IRQ_C_TERM_BIT)){
 			is_batt_full_eoc_stop = is_batt_full = true;
 			htc_gauge_event_notify(HTC_GAUGE_EVENT_EOC_STOP_CHG);
-			
+			/* disable pwrsrc after eoc */
 			if (is_hv_battery && !flag_keep_charge_on)
 				smb358_chg_disable_pwrsrc(chip, true,
 								PWRSRC_DISABLED_BIT_EOC);
@@ -3386,10 +3442,10 @@ int smb358_chg_safety_timer_set(struct smb358_charger *chip)
 	u8 reg = 0;
 	int rc;
 
-	
+	/* disable safety timer if debug flag 6 4 or 6 2000 is set */
 	if (!is_ac_online() || chip->safety_time == 0 ||
 			flag_keep_charge_on || flag_disable_safety_timer) {
-		
+		/* safety timer disabled */
 		rc = smb358_masked_write(chip, CFG_SFY_TIMER_CTRL_REG,
 				SAFETY_TIME_MINUTES_MASK, SAFETY_TIME_DISABLE_BIT);
 		if (rc)
@@ -3459,14 +3515,14 @@ static int smb358_load_battery_data(struct smb358_charger *chip)
 	struct device_node *node;
 	int id_result;
 
-	
+	/* STEP 1. assign or detect battery in use currently by ID. */
 	battery_id = (int)read_battery_id(chip) / 1000;
 	if (battery_id < 0) {
 		pr_err("cannot read battery id err = %lld\n", battery_id);
 		return battery_id;
 	}
 
-	
+	/* translate id_raw to id and set as cur_cell. */
 	id_result = htc_battery_cell_find_and_set_id_auto(battery_id);
 	pr_info("batt ID vol= %lldmv, id_result= %d\n", battery_id, id_result);
 
@@ -3495,7 +3551,7 @@ static int smb358_load_battery_data(struct smb358_charger *chip)
 		goto fail_load_battdata;
 	}
 
-	
+	/* Override charger configurations if specified in the battery profile */
 	if ((!test_power_monitor && !test_ftm_mode && !test_download_mode) &&
 			batt_data->max_voltage_uv >= 0)
 		chip->vfloat_mv = batt_data->max_voltage_uv / 1000;
@@ -3538,7 +3594,7 @@ int smb358_pinctrl_control(struct smb358_charger *chip)
 {
 	int ret = 0;
 
-	
+	/* Get pinctrl if target uses pinctrl */
 	chip->pinctrl = devm_pinctrl_get(chip->dev);
 	if (IS_ERR_OR_NULL(chip->pinctrl)) {
 		pr_err("Target does not use pinctrl\n");
@@ -3594,7 +3650,7 @@ int smb358_chg_aicl_enable(struct smb358_charger *chip, bool enable)
 		reg = AICL_ENABLED_BIT;
 	else
 		reg = 0x00;
-	
+	/* AICL enable/disable*/
 	rc = smb358_masked_write(chip, AICL_CONTROL_REG, AICL_ENABLED_BIT, reg);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't set AICL_ENABLED_BIT rc=%d\n",
@@ -3622,7 +3678,7 @@ int smb358_limit_input_current(bool enable, int reason)
 	if(chip->input_current_ma && is_ac_online()) {
 		limit_intput_current = chip->input_current_ma;
 
-		
+		/* disable AICL before change input current limit*/
 		rc = smb358_chg_aicl_enable(chip, false);
 		if (rc < 0) {
 			pr_err("enable/disable AICL failed rc=%d\n", rc);
@@ -3630,7 +3686,7 @@ int smb358_limit_input_current(bool enable, int reason)
 		}
 
 		if (enable) {
-			
+			/* Force to limit input current */
 			if (iusb_limit_reason & HTC_BATT_CHG_LIMIT_BIT_THRML)
 				limit_intput_current =
 					min(limit_intput_current, SMB358_INPUT_LIMIT_MA);
@@ -3641,13 +3697,13 @@ int smb358_limit_input_current(bool enable, int reason)
 				limit_intput_current, iusb_limit_reason,
 				chip->input_current_ma);
 
-		
+		/* set maximum input current limit */
 		rc = smb358_set_usb_chg_current(chip, limit_intput_current);
 		if (rc < 0) {
 			pr_err("set usb chg current fail rc=%d\n", rc);
 			return rc;
 		}
-		
+		/* enable AICL after change input current limit*/
 		rc = smb358_chg_aicl_enable(chip, true);
 		if (rc < 0) {
 			pr_err("enable/disable AICL failed rc=%d\n", rc);
@@ -3773,11 +3829,11 @@ int smb358_set_charger_after_eoc(bool enable)
 		return -EINVAL;
 	}
 
-	
+	/* set BATFET by charging_enabled */
 	smb358_chg_disable_charger(the_chip, !enable,
 								BATT_CHG_DISABLED_BIT_EOC);
 
-	
+	/* enable pwrsrc enable */
 	smb358_chg_disable_pwrsrc(the_chip, false,
 								PWRSRC_DISABLED_BIT_EOC);
 
@@ -3811,7 +3867,7 @@ static void smb358_idic_detection(struct smb358_charger *chip)
 		goto stop_idic_detect;
 	}
 
-	
+	/* Sample voltage 3 times */
 	for (i = 0; i < IDIC_VOLTAGE_SAMPLE; i ++) {
 		is_idic_detect_done = true;
 		vbat_sample[i] = smb358_get_prop_battery_voltage_now(chip)/1000;
@@ -3866,7 +3922,7 @@ int pm8909_set_hsml_target_ma(int target_ma)
 
 	return 0;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 #ifndef CONFIG_HTC_BATT_8960
 static void smb358_external_power_changed(struct power_supply *psy)
@@ -3894,7 +3950,7 @@ static void smb358_external_power_changed(struct power_supply *psy)
 
 	pr_info("current_limit = %d\n", current_limit);
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 #if defined(CONFIG_DEBUG_FS)
 #define LAST_CNFG_REG	0x13
@@ -4292,7 +4348,7 @@ static int determine_initial_state(struct smb358_charger *chip)
 	}
 
 #ifndef CONFIG_HTC_BATT_8960
-	
+	/* For current design, can ignore this */
 	if (reg & IRQ_A_HOT_HARD_BIT)
 		chip->batt_hot = true;
 	if (reg & IRQ_A_COLD_HARD_BIT)
@@ -4468,7 +4524,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 #endif
 	chip->fake_battery_soc = -EINVAL;
 
-	
+	/* early for VADC get, defer probe if needed */
 	chip->vadc_dev = qpnp_get_vadc(chip->dev, "chg");
 	if (IS_ERR(chip->vadc_dev)) {
 		rc = PTR_ERR(chip->vadc_dev);
@@ -4482,7 +4538,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 		dev_err(&client->dev, "Couldn't parse DT nodes rc=%d\n", rc);
 		return rc;
 	}
-	
+	/* i2c pull up regulator configuration */
 	if (chip->vcc_i2c) {
 		if (regulator_count_voltages(chip->vcc_i2c) > 0) {
 			rc = regulator_set_voltage(chip->vcc_i2c,
@@ -4509,14 +4565,14 @@ static int smb358_charger_probe(struct i2c_client *client,
 	mutex_init(&chip->path_suspend_lock);
 	mutex_init(&chip->charging_disable_lock);
 
-	
+	/* probe the device to check if its actually connected */
 	rc = smb358_read_reg(chip, CHG_OTH_CURRENT_CTRL_REG, &reg);
 	if (rc) {
 		pr_err("Failed to detect SMB358, device absent, rc = %d\n", rc);
 		goto err_set_vtg_i2c;
 	}
 
-	
+	/* using adc_tm for implementing pmic therm */
 	if (chip->using_pmic_therm) {
 		chip->adc_tm_dev = qpnp_get_adc_tm(chip->dev, "chg");
 		if (IS_ERR(chip->adc_tm_dev)) {
@@ -4541,7 +4597,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 	chip->batt_psy.external_power_changed = smb358_external_power_changed;
 	chip->batt_psy.supplied_to = pm_batt_supplied_to;
 	chip->batt_psy.num_supplicants = ARRAY_SIZE(pm_batt_supplied_to);
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 	chip->resume_completed = true;
 
 #ifndef CONFIG_HTC_BATT_8960
@@ -4551,11 +4607,11 @@ static int smb358_charger_probe(struct i2c_client *client,
 				rc);
 		goto err_set_vtg_i2c;
 	}
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
 	dump_regs(chip);
 
-	
+	/* read battery-id and select the battery profile */
 	rc = smb358_load_battery_data(chip);
 	if (rc) {
 		pr_err("Unable to read battery data %d\n", rc);
@@ -4595,7 +4651,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 	wake_lock_init(&chip->eoc_worker_lock, WAKE_LOCK_SUSPEND,
 			"smb358_eoc_worker_lock");
 
-	
+	/* We will not use it by default */
 	if (gpio_is_valid(chip->chg_valid_gpio)) {
 		rc = gpio_request(chip->chg_valid_gpio, "smb358_chg_valid");
 		if (rc) {
@@ -4627,7 +4683,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 	chip->irq_gpio = of_get_named_gpio_flags(chip->dev->of_node,
 				"qcom,irq-gpio", 0, NULL);
 
-	
+	/* STAT irq configuration */
 	if (gpio_is_valid(chip->irq_gpio)) {
 		rc = gpio_request(chip->irq_gpio, "smb358_irq");
 		if (rc) {
@@ -4672,7 +4728,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 #endif
 #if defined(CONFIG_HTC_BATT_GPIO_OVP)
 	chip->batt_ovp_irq = 49 + 911;
-        
+        /* BATT OVP irq configuration */
         if (gpio_is_valid(chip->batt_ovp_irq)) {
                 rc = gpio_request(chip->batt_ovp_irq, "Batt_ovp_irq");
                 if (rc) {
@@ -4704,11 +4760,11 @@ static int smb358_charger_probe(struct i2c_client *client,
 	start_ovp = gpio_get_value(the_chip->batt_ovp_irq);
 	pr_info("external OVP irq init value:%d\n", start_ovp);
 #endif
-	
+	/* debug flag 6 4 or 6 10000000 set, disable pmic thermal monitor */
 	if (!flag_keep_charge_on && !flag_disable_temp_protection &&
 			chip->using_pmic_therm) {
 		if (!chip->jeita_supported) {
-			
+			/* add hot/cold temperature monitor */
 			chip->adc_param.low_temp = chip->cold_bat_decidegc;
 			chip->adc_param.high_temp = chip->hot_bat_decidegc;
 		} else {
@@ -4722,7 +4778,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 				smb_chg_adc_notification;
 		chip->adc_param.channel = LR_MUX1_BATT_THERM;
 
-		
+		/* update battery missing info in tm_channel_measure*/
 		rc = qpnp_adc_tm_channel_measure(chip->adc_tm_dev,
 							&chip->adc_param);
 		if (rc)
@@ -4799,7 +4855,7 @@ static int smb358_suspend(struct device *dev)
 				"Couldn't save irq cfg regs rc = %d\n", rc);
 	}
 
-	
+	/* enable wake up IRQs */
 	rc = smb358_write_reg(chip, FAULT_INT_REG,
 			FAULT_INT_HOT_COLD_HARD_BIT | FAULT_INT_INPUT_UV_BIT);
 	if (rc < 0)
@@ -4857,7 +4913,7 @@ static int smb358_resume(struct device *dev)
 		}
 	}
 
-	
+	/* Restore IRQ config */
 	for (i = 0; i < 2; i++) {
 		rc = smb358_write_reg(chip, FAULT_INT_REG + i,
 					chip->irq_cfg_mask[i]);

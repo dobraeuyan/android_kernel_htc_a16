@@ -17,4 +17,4 @@
 void st_sensors_i2c_configure(struct iio_dev *indio_dev,
 		struct i2c_client *client, struct st_sensor_data *sdata);
 
-#endif 
+#endif /* ST_SENSORS_I2C_H */

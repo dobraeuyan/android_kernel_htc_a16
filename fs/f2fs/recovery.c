@@ -14,6 +14,36 @@
 #include "node.h"
 #include "segment.h"
 
+/*
+ * Roll forward recovery scenarios.
+ *
+ * [Term] F: fsync_mark, D: dentry_mark
+ *
+ * 1. inode(x) | CP | inode(x) | dnode(F)
+ * -> Update the latest inode(x).
+ *
+ * 2. inode(x) | CP | inode(F) | dnode(F)
+ * -> No problem.
+ *
+ * 3. inode(x) | CP | dnode(F) | inode(x)
+ * -> Recover to the latest dnode(F), and drop the last inode(x)
+ *
+ * 4. inode(x) | CP | dnode(F) | inode(F)
+ * -> No problem.
+ *
+ * 5. CP | inode(x) | dnode(F)
+ * -> The inode(DF) was missing. Should drop this dnode(F).
+ *
+ * 6. CP | inode(DF) | dnode(F)
+ * -> No problem.
+ *
+ * 7. CP | dnode(F) | inode(DF)
+ * -> If f2fs_iget fails, then goto next to find inode(DF).
+ *
+ * 8. CP | dnode(F) | inode(x)
+ * -> If f2fs_iget fails, then goto next to find inode(DF).
+ *    But it will fail due to no inode(DF).
+ */
 
 static struct kmem_cache *fsync_entry_slab;
 
@@ -146,7 +176,7 @@ static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head)
 	block_t blkaddr;
 	int err = 0;
 
-	
+	/* get node pages in the current segment */
 	curseg = CURSEG_I(sbi, CURSEG_WARM_NODE);
 	blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);
 
@@ -174,12 +204,16 @@ static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head)
 					break;
 			}
 
-			
+			/* add this fsync inode to the list */
 			entry = kmem_cache_alloc(fsync_entry_slab, GFP_F2FS_ZERO);
 			if (!entry) {
 				err = -ENOMEM;
 				break;
 			}
+			/*
+			 * CP | dnode(F) | inode(DF)
+			 * For this case, we should not give up now.
+			 */
 			entry->inode = f2fs_iget(sbi->sb, ino_of_node(page));
 			if (IS_ERR(entry->inode)) {
 				err = PTR_ERR(entry->inode);
@@ -200,7 +234,7 @@ static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head)
 				entry->last_dentry = blkaddr;
 		}
 next:
-		
+		/* check next segment */
 		blkaddr = next_blkaddr_of_node(page);
 		f2fs_put_page(page, 1);
 
@@ -241,7 +275,7 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 	if (!f2fs_test_bit(blkoff, sentry->cur_valid_map))
 		return 0;
 
-	
+	/* Get the previous summary */
 	for (i = CURSEG_WARM_DATA; i <= CURSEG_COLD_DATA; i++) {
 		struct curseg_info *curseg = CURSEG_I(sbi, i);
 		if (curseg->segno == segno) {
@@ -255,7 +289,7 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 	sum = sum_node->entries[blkoff];
 	f2fs_put_page(sum_page, 1);
 got_it:
-	
+	/* Use the locked dnode page and inode */
 	nid = le32_to_cpu(sum.nid);
 	if (dn->inode->i_ino == nid) {
 		tdn.nid = nid;
@@ -269,7 +303,7 @@ got_it:
 		goto truncate_out;
 	}
 
-	
+	/* Get the node page */
 	node_page = get_node_page(sbi, nid);
 	if (IS_ERR(node_page))
 		return PTR_ERR(node_page);
@@ -279,7 +313,7 @@ got_it:
 	f2fs_put_page(node_page, 1);
 
 	if (ino != dn->inode->i_ino) {
-		
+		/* Deallocate previous index in the node page */
 		inode = f2fs_iget(sbi->sb, ino);
 		if (IS_ERR(inode))
 			return PTR_ERR(inode);
@@ -290,6 +324,10 @@ got_it:
 	bidx = start_bidx_of_node(offset, F2FS_I(inode)) +
 			le16_to_cpu(sum.ofs_in_node);
 
+	/*
+	 * if inode page is locked, unlock temporarily, but its reference
+	 * count keeps alive.
+	 */
 	if (ino == dn->inode->i_ino && dn->inode_page_locked)
 		unlock_page(dn->inode_page);
 
@@ -325,19 +363,23 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 	struct node_info ni;
 	int err = 0, recovered = 0;
 
-	
+	/* step 1: recover xattr */
 	if (IS_INODE(page)) {
 		recover_inline_xattr(inode, page);
 	} else if (f2fs_has_xattr_block(ofs_of_node(page))) {
+		/*
+		 * Deprecated; xattr blocks should be found from cold log.
+		 * But, we should remain this for backward compatibility.
+		 */
 		recover_xattr_data(inode, page, blkaddr);
 		goto out;
 	}
 
-	
+	/* step 2: recover inline data */
 	if (recover_inline_data(inode, page))
 		goto out;
 
-	
+	/* step 3: recover data indices */
 	start = start_bidx_of_node(ofs_of_node(page), fi);
 	end = start + ADDRS_PER_PAGE(page, fi);
 
@@ -359,16 +401,20 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 		src = datablock_addr(dn.node_page, dn.ofs_in_node);
 		dest = datablock_addr(page, dn.ofs_in_node);
 
-		
+		/* skip recovering if dest is the same as src */
 		if (src == dest)
 			continue;
 
-		
+		/* dest is invalid, just invalidate src block */
 		if (dest == NULL_ADDR) {
 			truncate_data_blocks_range(&dn, 1);
 			continue;
 		}
 
+		/*
+		 * dest is reserved block, invalidate src block
+		 * and then reserve one new block in dnode page.
+		 */
 		if (dest == NEW_ADDR) {
 			truncate_data_blocks_range(&dn, 1);
 			err = reserve_new_block(&dn);
@@ -376,21 +422,21 @@ static int do_recover_data(struct f2fs_sb_info *sbi, struct inode *inode,
 			continue;
 		}
 
-		
+		/* dest is valid block, try to recover from src to dest */
 		if (is_valid_blkaddr(sbi, dest, META_POR)) {
 
 			if (src == NULL_ADDR) {
 				err = reserve_new_block(&dn);
-				
+				/* We should not get -ENOSPC */
 				f2fs_bug_on(sbi, err);
 			}
 
-			
+			/* Check the previous node page having this index */
 			err = check_index_in_prev_nodes(sbi, dest, &dn);
 			if (err)
 				goto err;
 
-			
+			/* write dummy data page */
 			f2fs_replace_block(sbi, &dn, src, dest,
 							ni.version, false);
 			recovered++;
@@ -422,7 +468,7 @@ static int recover_data(struct f2fs_sb_info *sbi,
 	int err = 0;
 	block_t blkaddr;
 
-	
+	/* get node pages in the current segment */
 	curseg = CURSEG_I(sbi, type);
 	blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);
 
@@ -444,6 +490,11 @@ static int recover_data(struct f2fs_sb_info *sbi,
 		entry = get_fsync_inode(head, ino_of_node(page));
 		if (!entry)
 			goto next;
+		/*
+		 * inode(x) | CP | inode(x) | dnode(F)
+		 * In this case, we can lose the latest inode(x).
+		 * So, call recover_inode for the inode update.
+		 */
 		if (entry->last_inode == blkaddr)
 			recover_inode(entry->inode, page);
 		if (entry->last_dentry == blkaddr) {
@@ -465,7 +516,7 @@ static int recover_data(struct f2fs_sb_info *sbi,
 			kmem_cache_free(fsync_entry_slab, entry);
 		}
 next:
-		
+		/* check next segment */
 		blkaddr = next_blkaddr_of_node(page);
 		f2fs_put_page(page, 1);
 	}
@@ -489,12 +540,12 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 
 	INIT_LIST_HEAD(&inode_list);
 
-	
+	/* prevent checkpoint */
 	mutex_lock(&sbi->cp_mutex);
 
 	blkaddr = NEXT_FREE_BLKADDR(sbi, curseg);
 
-	
+	/* step #1: find fsynced inode numbers */
 	err = find_fsync_dnodes(sbi, &inode_list);
 	if (err)
 		goto out;
@@ -504,7 +555,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi)
 
 	need_writecp = true;
 
-	
+	/* step #2: recover data */
 	err = recover_data(sbi, &inode_list, CURSEG_WARM_NODE);
 	if (!err)
 		f2fs_bug_on(sbi, !list_empty(&inode_list));
@@ -512,7 +563,7 @@ out:
 	destroy_fsync_dnodes(&inode_list);
 	kmem_cache_destroy(fsync_entry_slab);
 
-	
+	/* truncate meta pages to be used by the recovery */
 	truncate_inode_pages_range(META_MAPPING(sbi),
 			(loff_t)MAIN_BLKADDR(sbi) << PAGE_CACHE_SHIFT, -1);
 
@@ -528,11 +579,11 @@ out:
 		if (discard_next_dnode(sbi, blkaddr))
 			invalidate = true;
 
-		
+		/* Flush all the NAT/SIT pages */
 		while (get_pages(sbi, F2FS_DIRTY_META))
 			sync_meta_pages(sbi, META, LONG_MAX);
 
-		
+		/* invalidate temporary meta page */
 		if (invalidate)
 			invalidate_mapping_pages(META_MAPPING(sbi),
 							blkaddr, blkaddr);

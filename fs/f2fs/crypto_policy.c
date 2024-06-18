@@ -25,6 +25,10 @@ static int f2fs_inode_has_encryption_context(struct inode *inode)
 	return (res > 0);
 }
 
+/*
+ * check whether the policy is consistent with the encryption context
+ * for the inode
+ */
 static int f2fs_is_encryption_context_consistent_with_policy(
 	struct inode *inode, const struct f2fs_encryption_policy *policy)
 {
@@ -142,10 +146,10 @@ int f2fs_is_child_context_consistent_with_parent(struct inode *parent,
 		BUG_ON(1);
 	}
 
-	
+	/* no restrictions if the parent directory is not encrypted */
 	if (!f2fs_encrypted_inode(parent))
 		return 1;
-	
+	/* if the child directory is not encrypted, this is always a problem */
 	if (!f2fs_encrypted_inode(child))
 		return 0;
 	res = f2fs_get_encryption_info(parent);
@@ -169,6 +173,13 @@ int f2fs_is_child_context_consistent_with_parent(struct inode *parent,
 		(parent_ci->ci_flags == child_ci->ci_flags));
 }
 
+/**
+ * f2fs_inherit_context() - Sets a child context from its parent
+ * @parent: Parent inode from which the context is inherited.
+ * @child:  Child inode that inherits the context from @parent.
+ *
+ * Return: Zero on success, non-zero otherwise
+ */
 int f2fs_inherit_context(struct inode *parent, struct inode *child,
 						struct page *ipage)
 {

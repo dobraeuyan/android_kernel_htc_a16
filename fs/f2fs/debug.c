@@ -32,7 +32,7 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
 	int i;
 
-	
+	/* validation check of the segment numbers */
 	si->hit_largest = atomic64_read(&sbi->read_hit_largest);
 	si->hit_cached = atomic64_read(&sbi->read_hit_cached);
 	si->hit_rbtree = atomic64_read(&sbi->read_hit_rbtree);
@@ -92,6 +92,9 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	si->inplace_count = atomic_read(&sbi->inplace_count);
 }
 
+/*
+ * This function calculates BDF of every segments
+ */
 static void update_sit_info(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
@@ -122,6 +125,9 @@ static void update_sit_info(struct f2fs_sb_info *sbi)
 		si->avg_vblocks = 0;
 }
 
+/*
+ * This function calculates memory footprint.
+ */
 static void update_mem_info(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
@@ -135,10 +141,10 @@ static void update_mem_info(struct f2fs_sb_info *sbi)
 	si->base_mem += 2 * sizeof(struct f2fs_inode_info);
 	si->base_mem += sizeof(*sbi->ckpt);
 
-	
+	/* build sm */
 	si->base_mem += sizeof(struct f2fs_sm_info);
 
-	
+	/* build sit */
 	si->base_mem += sizeof(struct sit_info);
 	si->base_mem += MAIN_SEGS(sbi) * sizeof(struct seg_entry);
 	si->base_mem += f2fs_bitmap_size(MAIN_SEGS(sbi));
@@ -148,36 +154,36 @@ static void update_mem_info(struct f2fs_sb_info *sbi)
 		si->base_mem += MAIN_SECS(sbi) * sizeof(struct sec_entry);
 	si->base_mem += __bitmap_size(sbi, SIT_BITMAP);
 
-	
+	/* build free segmap */
 	si->base_mem += sizeof(struct free_segmap_info);
 	si->base_mem += f2fs_bitmap_size(MAIN_SEGS(sbi));
 	si->base_mem += f2fs_bitmap_size(MAIN_SECS(sbi));
 
-	
+	/* build curseg */
 	si->base_mem += sizeof(struct curseg_info) * NR_CURSEG_TYPE;
 	si->base_mem += PAGE_CACHE_SIZE * NR_CURSEG_TYPE;
 
-	
+	/* build dirty segmap */
 	si->base_mem += sizeof(struct dirty_seglist_info);
 	si->base_mem += NR_DIRTY_TYPE * f2fs_bitmap_size(MAIN_SEGS(sbi));
 	si->base_mem += f2fs_bitmap_size(MAIN_SECS(sbi));
 
-	
+	/* build nm */
 	si->base_mem += sizeof(struct f2fs_nm_info);
 	si->base_mem += __bitmap_size(sbi, NAT_BITMAP);
 
 get_cache:
 	si->cache_mem = 0;
 
-	
+	/* build gc */
 	if (sbi->gc_thread)
 		si->cache_mem += sizeof(struct f2fs_gc_kthread);
 
-	
+	/* build merge flush thread */
 	if (SM_I(sbi)->cmd_control_info)
 		si->cache_mem += sizeof(struct flush_cmd_control);
 
-	
+	/* free nids */
 	si->cache_mem += NM_I(sbi)->fcnt * sizeof(struct free_nid);
 	si->cache_mem += NM_I(sbi)->nat_cnt * sizeof(struct nat_entry);
 	si->cache_mem += NM_I(sbi)->dirty_nat_cnt *
@@ -320,12 +326,12 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "LFS: %u blocks in %u segments\n",
 			   si->block_count[LFS], si->segment_count[LFS]);
 
-		
+		/* segment usage info */
 		update_sit_info(si->sbi);
 		seq_printf(s, "\nBDF: %u, avg. vblocks: %u\n",
 			   si->bimodal, si->avg_vblocks);
 
-		
+		/* memory footprint */
 		update_mem_info(si->sbi);
 		seq_printf(s, "\nMemory: %llu KB\n",
 			(si->base_mem + si->cache_mem + si->page_mem) >> 10);

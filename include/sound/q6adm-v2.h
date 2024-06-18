@@ -53,6 +53,7 @@ enum {
 #define MAX_COPPS_PER_PORT 0x8
 #define ADM_MAX_CHANNELS 8
 
+/* multiple copp per stream. */
 struct route_payload {
 	unsigned int copp_idx[MAX_COPPS_PER_PORT];
 	unsigned int port_id[MAX_COPPS_PER_PORT];
@@ -144,12 +145,14 @@ int adm_send_compressed_device_mute(int port_id, int copp_idx, bool mute_on);
 
 int adm_send_compressed_device_latency(int port_id, int copp_idx, int latency);
 
+//htc audio ++
 int q6adm_enable_effect(int port_id, uint32_t module_id, uint32_t param_id,
 		uint32_t payload_size, void *payload);
+//htc audio --
 int adm_set_sound_focus(int port_id, int copp_idx,
 			struct sound_focus_param soundFocusData);
 int adm_get_sound_focus(int port_id, int copp_idx,
 			struct sound_focus_param *soundFocusData);
 int adm_get_source_tracking(int port_id, int copp_idx,
 			    struct source_tracking_param *sourceTrackingData);
-#endif 
+#endif /* __Q6_ADM_V2_H__ */

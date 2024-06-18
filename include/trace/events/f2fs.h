@@ -1227,7 +1227,7 @@ TRACE_EVENT(f2fs_destroy_extent_tree,
 		__entry->node_cnt)
 );
 
-#endif 
+#endif /* _TRACE_F2FS_H */
 
- 
+ /* This part must be outside protection */
 #include <trace/define_trace.h>

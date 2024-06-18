@@ -56,4 +56,4 @@ static inline int f2fs_init_acl(struct inode *inode, struct inode *dir,
 	return 0;
 }
 #endif
-#endif 
+#endif /* __F2FS_ACL_H__ */

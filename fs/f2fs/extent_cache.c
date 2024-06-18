@@ -75,7 +75,7 @@ static struct extent_tree *__grab_extent_tree(struct inode *inode)
 	atomic_inc(&et->refcount);
 	up_write(&sbi->extent_tree_lock);
 
-	
+	/* never died until evict_inode */
 	F2FS_I(inode)->extent_tree = et;
 
 	return et;
@@ -245,6 +245,15 @@ out:
 }
 
 
+/*
+ * lookup extent at @fofs, if hit, return the extent
+ * if not, return NULL and
+ * @prev_ex: extent before fofs
+ * @next_ex: extent after fofs
+ * @insert_p: insert point for new extent at fofs
+ * in order to simpfy the insertion after.
+ * tree must stay unchanged between lookup and insertion.
+ */
 static struct extent_node *__lookup_extent_tree_ret(struct extent_tree *et,
 				unsigned int fofs,
 				struct extent_node **prev_ex,
@@ -302,13 +311,13 @@ static struct extent_node *__lookup_extent_tree_ret(struct extent_tree *et,
 
 lookup_neighbors:
 	if (fofs == en->ei.fofs) {
-		
+		/* lookup prev node for merging backward later */
 		tmp_node = rb_prev(&en->rb_node);
 		*prev_ex = tmp_node ?
 			rb_entry(tmp_node, struct extent_node, rb_node) : NULL;
 	}
 	if (fofs == en->ei.fofs + en->ei.len - 1) {
-		
+		/* lookup next node for merging frontward later */
 		tmp_node = rb_next(&en->rb_node);
 		*next_ex = tmp_node ?
 			rb_entry(tmp_node, struct extent_node, rb_node) : NULL;
@@ -411,18 +420,22 @@ static unsigned int f2fs_update_extent_tree_range(struct inode *inode,
 	prev = et->largest;
 	dei.len = 0;
 
+	/*
+	 * drop largest extent before lookup, in case it's already
+	 * been shrunk from extent tree
+	 */
 	__drop_largest_extent(inode, fofs, len);
 
-	
+	/* 1. lookup first extent node in range [fofs, fofs + len - 1] */
 	en = __lookup_extent_tree_ret(et, fofs, &prev_en, &next_en,
 					&insert_p, &insert_parent);
 	if (!en)
 		en = next_en;
 
-	
+	/* 2. invlidate all extent nodes in range [fofs, fofs + len - 1] */
 	while (en && en->ei.fofs < end) {
 		unsigned int org_end;
-		int parts = 0;	
+		int parts = 0;	/* # of parts current extent split into */
 
 		next_en = en1 = NULL;
 
@@ -466,12 +479,17 @@ static unsigned int f2fs_update_extent_tree_range(struct inode *inode,
 		else
 			__detach_extent_node(sbi, et, en);
 
+		/*
+		 * if original extent is split into zero or two parts, extent
+		 * tree has been altered by deletion or insertion, therefore
+		 * invalidate pointers regard to tree.
+		 */
 		if (parts != 1) {
 			insert_p = NULL;
 			insert_parent = NULL;
 		}
 
-		
+		/* update in global extent list */
 		spin_lock(&sbi->extent_lock);
 		if (!parts && !list_empty(&en->list))
 			list_del(&en->list);
@@ -479,14 +497,14 @@ static unsigned int f2fs_update_extent_tree_range(struct inode *inode,
 			list_add_tail(&en1->list, &sbi->extent_list);
 		spin_unlock(&sbi->extent_lock);
 
-		
+		/* release extent node */
 		if (!parts)
 			kmem_cache_free(extent_node_slab, en);
 
 		en = next_en;
 	}
 
-	
+	/* 3. update extent in extent cache */
 	if (blkaddr) {
 		struct extent_node *den = NULL;
 
@@ -497,7 +515,7 @@ static unsigned int f2fs_update_extent_tree_range(struct inode *inode,
 			en1 = __insert_extent_tree(sbi, et, &ei,
 						insert_p, insert_parent);
 
-		
+		/* give up extent_cache, if split and small updates happen */
 		if (dei.len >= 1 &&
 				prev.len < F2FS_MIN_EXTENT_LEN &&
 				et->largest.len < F2FS_MIN_EXTENT_LEN) {
@@ -544,7 +562,7 @@ unsigned int f2fs_shrink_extent_tree(struct f2fs_sb_info *sbi, int nr_shrink)
 	if (!down_write_trylock(&sbi->extent_tree_lock))
 		goto out;
 
-	
+	/* 1. remove unreferenced extent tree */
 	while ((found = radix_tree_gang_lookup(root,
 				(void **)treevec, ino, EXT_TREE_VEC_SIZE))) {
 		unsigned i;
@@ -570,7 +588,7 @@ unsigned int f2fs_shrink_extent_tree(struct f2fs_sb_info *sbi, int nr_shrink)
 	}
 	up_write(&sbi->extent_tree_lock);
 
-	
+	/* 2. remove LRU extent entries */
 	if (!down_write_trylock(&sbi->extent_tree_lock))
 		goto out;
 
@@ -584,6 +602,9 @@ unsigned int f2fs_shrink_extent_tree(struct f2fs_sb_info *sbi, int nr_shrink)
 	}
 	spin_unlock(&sbi->extent_lock);
 
+	/*
+	 * reset ino for searching victims from beginning of global extent tree.
+	 */
 	ino = F2FS_ROOT_INO(sbi);
 
 	while ((found = radix_tree_gang_lookup(root,
@@ -640,10 +661,10 @@ void f2fs_destroy_extent_tree(struct inode *inode)
 		return;
 	}
 
-	
+	/* free all extent info belong to this extent tree */
 	node_cnt = f2fs_destroy_extent_node(inode);
 
-	
+	/* delete extent tree entry in radix tree */
 	down_write(&sbi->extent_tree_lock);
 	atomic_dec(&et->refcount);
 	f2fs_bug_on(sbi, atomic_read(&et->refcount) || et->count);

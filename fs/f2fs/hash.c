@@ -20,6 +20,9 @@
 
 #include "f2fs.h"
 
+/*
+ * Hashing code copied from ext3
+ */
 #define DELTA 0x9E3779B9
 
 static void TEA_transform(unsigned int buf[4], unsigned int const in[])
@@ -79,7 +82,7 @@ f2fs_hash_t f2fs_dentry_hash(const struct qstr *name_info)
 	if (is_dot_dotdot(name_info))
 		return 0;
 
-	
+	/* Initialize the default seed for the hash checksum functions */
 	buf[0] = 0x67452301;
 	buf[1] = 0xefcdab89;
 	buf[2] = 0x98badcfe;

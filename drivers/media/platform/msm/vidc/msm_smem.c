@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -20,6 +20,9 @@
 #include "htc_msm_smem.h"
 
 
+/* HTC_START: ION debug mechanism enhancement
+ * Remove struct smem_client from here to msm_vidc.h
+ */
 #if 0
 struct smem_client {
 	int mem_type;
@@ -27,6 +30,7 @@ struct smem_client {
 	struct msm_vidc_platform_resources *res;
 };
 #endif
+/* HTC_END */
 
 static int get_device_address(struct smem_client *smem_client,
 		struct ion_handle *hndl, unsigned long align,
@@ -38,7 +42,7 @@ static int get_device_address(struct smem_client *smem_client,
 	struct ion_client *clnt = NULL;
 
 	if (!iova || !buffer_size || !hndl || !smem_client) {
-		dprintk(VIDC_ERR, "Invalid params: %p, %p, %p, %p\n",
+		dprintk(VIDC_ERR, "Invalid params: %pK, %pK, %pK, %pK\n",
 				smem_client, hndl, iova, buffer_size);
 		return -EINVAL;
 	}
@@ -90,7 +94,7 @@ static void put_device_address(struct smem_client *smem_client,
 	struct ion_client *clnt = NULL;
 
 	if (!hndl || !smem_client) {
-		dprintk(VIDC_WARN, "Invalid params: %p, %p\n",
+		dprintk(VIDC_WARN, "Invalid params: %pK, %pK\n",
 				smem_client, hndl);
 		return;
 	}
@@ -124,7 +128,7 @@ static int ion_user_to_kernel(struct smem_client *client, int fd, u32 offset,
 
 	hndl = ion_import_dma_buf(client->clnt, fd);
 	if (IS_ERR_OR_NULL(hndl)) {
-		dprintk(VIDC_ERR, "Failed to get handle: %p, %d, %d, %p\n",
+		dprintk(VIDC_ERR, "Failed to get handle: %pK, %d, %d, %pK\n",
 				client, fd, offset, hndl);
 		rc = -ENOMEM;
 		goto fail_import_fd;
@@ -156,29 +160,38 @@ static int ion_user_to_kernel(struct smem_client *client, int fd, u32 offset,
 			&iova, (u32)mem->device_addr);
 		goto fail_device_address;
 	}
-	dprintk(VIDC_DBG,
-		"%s: ion_handle = 0x%p, fd = %d, device_addr = 0x%pa, size = %zx, kvaddr = 0x%p, buffer_type = %d, flags = 0x%lx\n",
-		__func__, mem->smem_priv, fd, &mem->device_addr, mem->size,
-		mem->kvaddr, mem->buffer_type, mem->flags);
+ 	dprintk(VIDC_DBG,
+		"%s: ion_handle = 0x%pK, fd = %d, device_addr = 0x%pa, size = %zx, kvaddr = 0x%pK, buffer_type = %d, flags = 0x%lx\n",
+ 		__func__, mem->smem_priv, fd, &mem->device_addr, mem->size,
+ 		mem->kvaddr, mem->buffer_type, mem->flags);
+        /* HTC_START: ION debug mechanism enhancement
+         * The alphabet after Alloc_/Import_/Free_ represents for different meaning.
+         * I: Input buffer
+         * O: Output buffer
+         * S: Scratch buffer
+         * V: Venus hfi buffer
+         * P: Persist buffer
+         * U: Unknown buffer
+         */
         switch (mem->buffer_type) {
         case HAL_BUFFER_INPUT:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Import_I: Addr(%p) SZ(%zx) FD(%d)\n",
+                        "[Vidc_Mem][%pK] Import_I: Addr(%pK) SZ(%zx) FD(%d)\n",
                         client->inst, hndl->buffer, mem->size, fd);
                 break;
         case HAL_BUFFER_OUTPUT:
         case HAL_BUFFER_OUTPUT2:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Import_O: Addr(%p) SZ(%zx) FD(%d)\n",
+                        "[Vidc_Mem][%pK] Import_O: Addr(%pK) SZ(%zx) FD(%d)\n",
                         client->inst, hndl->buffer, mem->size, fd);
                 break;
         default:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Import_U: Addr(%p) SZ(%zx) FD(%d)\n",
+                        "[Vidc_Mem][%pK] Import_U: Addr(%pK) SZ(%zx) FD(%d)\n",
                         client->inst, hndl->buffer, mem->size, fd);
                 break;
         }
-        
+        /* HTC_END */
 	return rc;
 fail_device_address:
 	ion_free(client->clnt, hndl);
@@ -221,7 +234,7 @@ static int alloc_ion_mem(struct smem_client *client, size_t size, u32 align,
 	hndl = ion_alloc(client->clnt, size, align, heap_mask, flags);
 	if (IS_ERR_OR_NULL(hndl)) {
 		dprintk(VIDC_ERR,
-		"Failed to allocate shared memory = %p, %zx, %d, 0x%x\n",
+		"Failed to allocate shared memory = %pK, %zx, %d, 0x%x\n",
 		client, size, align, flags);
 		rc = -ENOMEM;
 		goto fail_shared_mem_alloc;
@@ -259,36 +272,45 @@ static int alloc_ion_mem(struct smem_client *client, size_t size, u32 align,
 	}
 	mem->size = size;
 	dprintk(VIDC_DBG,
-		"%s: ion_handle = 0x%p, device_addr = 0x%pa, size = 0x%zx, kvaddr = 0x%p, buffer_type = 0x%x, flags = 0x%lx\n",
+		"%s: ion_handle = 0x%pK, device_addr = 0x%pa, size = 0x%zx, kvaddr = 0x%pK, buffer_type = 0x%x, flags = 0x%lx\n",
 		__func__, mem->smem_priv, &mem->device_addr,
 		mem->size, mem->kvaddr,
 		mem->buffer_type, mem->flags);
+        /* HTC_START: ION debug mechanism enhancement
+         * The alphabet after Alloc_/Import_/Free_ represents for different meaning.
+         * I: Input buffer
+         * O: Output buffer
+         * S: Scratch buffer
+         * V: Venus hfi buffer
+         * P: Persist buffer
+         * U: Unknown buffer
+         */
         switch (mem->buffer_type) {
         case HAL_BUFFER_INTERNAL_SCRATCH:
         case HAL_BUFFER_INTERNAL_SCRATCH_1:
         case HAL_BUFFER_INTERNAL_SCRATCH_2:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Alloc_S: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Alloc_S: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, size);
                 break;
         case HAL_BUFFER_INTERNAL_CMD_QUEUE:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Alloc_V: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Alloc_V: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, size);
                 break;
         case HAL_BUFFER_INTERNAL_PERSIST:
         case HAL_BUFFER_INTERNAL_PERSIST_1:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Alloc_P: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Alloc_P: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, size);
                 break;
         default:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Alloc_U: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Alloc_U: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, size);
                 break;
         }
-        
+        /* HTC_END */
 	return rc;
 fail_device_address:
 	ion_unmap_kernel(client->clnt, hndl);
@@ -301,50 +323,60 @@ fail_shared_mem_alloc:
 static void free_ion_mem(struct smem_client *client, struct msm_smem *mem)
 {
 	int domain, partition, rc;
+        /* HTC_START: ION debug mechanism enhancement
+         * The alphabet after Alloc_/Import_/Free_ represents for different meaning.
+         * I: Input buffer
+         * O: Output buffer
+         * S: Scratch buffer
+         * V: Venus hfi buffer
+         * P: Persist buffer
+         * U: Unknown buffer
+         */
         struct ion_handle *hndl = mem->smem_priv;
 
         switch (mem->buffer_type) {
         case HAL_BUFFER_INPUT:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_I: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_I: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         case HAL_BUFFER_OUTPUT:
         case HAL_BUFFER_OUTPUT2:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_O: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_O: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         case HAL_BUFFER_INTERNAL_SCRATCH:
         case HAL_BUFFER_INTERNAL_SCRATCH_1:
         case HAL_BUFFER_INTERNAL_SCRATCH_2:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_S: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_S: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         case HAL_BUFFER_INTERNAL_CMD_QUEUE:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_V: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_V: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         case HAL_BUFFER_INTERNAL_PERSIST:
         case HAL_BUFFER_INTERNAL_PERSIST_1:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_P: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_P: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         default:
                 dprintk(VIDC_PROF,
-                        "[Vidc_Mem][%p] Free_U: Addr(%p) SZ(%zx)\n",
+                        "[Vidc_Mem][%pK] Free_U: Addr(%pK) SZ(%zx)\n",
                         client->inst, hndl->buffer, mem->size);
                 break;
         }
-        
+        /* HTC_END */
 
-	dprintk(VIDC_DBG,
-		"%s: ion_handle = 0x%p, device_addr = 0x%pa, size = 0x%zx, kvaddr = 0x%p, buffer_type = 0x%x\n",
-		__func__, mem->smem_priv, &mem->device_addr,
-		mem->size, mem->kvaddr, mem->buffer_type);
+ 	dprintk(VIDC_DBG,
+		"%s: ion_handle = 0x%pK, device_addr = 0x%pa, size = 0x%zx, kvaddr = 0x%pK, buffer_type = 0x%x\n",
+ 		__func__, mem->smem_priv, &mem->device_addr,
+ 		mem->size, mem->kvaddr, mem->buffer_type);
+
 	rc = msm_smem_get_domain_partition((void *)client, mem->flags,
 			mem->buffer_type, &domain, &partition);
 	if (rc) {
@@ -425,7 +457,7 @@ static int ion_cache_operations(struct smem_client *client,
 	int rc = 0;
 	int msm_cache_ops = 0;
 	if (!mem || !client) {
-		dprintk(VIDC_ERR, "Invalid params: %p, %p\n",
+		dprintk(VIDC_ERR, "Invalid params: %pK, %pK\n",
 			mem, client);
 		return -EINVAL;
 	}
@@ -473,7 +505,7 @@ int msm_smem_cache_operations(void *clt, struct msm_smem *mem,
 	struct smem_client *client = clt;
 	int rc = 0;
 	if (!client) {
-		dprintk(VIDC_ERR, "Invalid params: %p\n",
+		dprintk(VIDC_ERR, "Invalid params: %pK\n",
 			client);
 		return -EINVAL;
 	}
@@ -570,6 +602,10 @@ void msm_smem_free(void *clt, struct msm_smem *mem)
 	}
 	switch (client->mem_type) {
 	case SMEM_ION:
+                /* HTC_START: ION debug mechanism enhancement
+                 * Switch ion_client from clnt_import to clnt_alloc here due to
+                 * scratch buffer is allocated by clnt_alloc
+                 */
                 if ((mem->buffer_type == HAL_BUFFER_INTERNAL_SCRATCH) ||
                         (mem->buffer_type == HAL_BUFFER_INTERNAL_SCRATCH_1) ||
                         (mem->buffer_type == HAL_BUFFER_INTERNAL_SCRATCH_2) ||
@@ -585,7 +621,7 @@ void msm_smem_free(void *clt, struct msm_smem *mem)
                         (mem->buffer_type == HAL_BUFFER_INTERNAL_PERSIST_1)) {
                         client->clnt = client->clnt_import;
                 }
-                
+                /* HTC_END */
 		break;
 	default:
 		dprintk(VIDC_ERR, "Mem type not supported\n");

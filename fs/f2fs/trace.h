@@ -43,4 +43,4 @@ extern void f2fs_destroy_trace_ios(void);
 #define f2fs_destroy_trace_ios()
 
 #endif
-#endif 
+#endif /* __F2FS_TRACE_H__ */

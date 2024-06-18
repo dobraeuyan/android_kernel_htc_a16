@@ -101,7 +101,7 @@ static int do_read_inode(struct inode *inode)
 	struct page *node_page;
 	struct f2fs_inode *ri;
 
-	
+	/* Check if ino is within scope */
 	if (check_nid_range(sbi, inode->i_ino)) {
 		f2fs_msg(inode->i_sb, KERN_ERR, "bad inode number: %lu",
 			 (unsigned long) inode->i_ino);
@@ -142,11 +142,11 @@ static int do_read_inode(struct inode *inode)
 
 	get_inline_info(fi, ri);
 
-	
+	/* check data exist */
 	if (f2fs_has_inline_data(inode) && !f2fs_exist_data(inode))
 		__recover_inline_status(inode, node_page);
 
-	
+	/* get rdev by using inline_info */
 	__get_inode_rdev(inode, ri);
 
 	if (__written_first_block(ri))
@@ -295,12 +295,19 @@ int f2fs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	if (!is_inode_flag_set(F2FS_I(inode), FI_DIRTY_INODE))
 		return 0;
 
+	/*
+	 * We need to balance fs here to prevent from producing dirty node pages
+	 * during the urgent cleaning time when runing out of free sections.
+	 */
 	update_inode_page(inode);
 
 	f2fs_balance_fs(sbi);
 	return 0;
 }
 
+/*
+ * Called at the last iput() if i_nlink is zero
+ */
 void f2fs_evict_inode(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
@@ -308,7 +315,7 @@ void f2fs_evict_inode(struct inode *inode)
 	nid_t xnid = fi->i_xattr_nid;
 	int err = 0;
 
-	
+	/* some remained atomic pages should discarded */
 	if (f2fs_is_atomic_file(inode))
 		commit_inmem_pages(inode, true);
 
@@ -363,6 +370,11 @@ no_delete:
 
 	if (err && err != -ENOENT) {
 		if (!exist_written_data(sbi, inode->i_ino, ORPHAN_INO)) {
+			/*
+			 * get here because we failed to release resource
+			 * of inode previously, reminder our user to run fsck
+			 * for fixing.
+			 */
 			set_sbi_flag(sbi, SBI_NEED_FSCK);
 			f2fs_msg(sbi->sb, KERN_WARNING,
 				"inode (ino:%lu) resource leak, run fsck "
@@ -377,6 +389,7 @@ out_clear:
 	clear_inode(inode);
 }
 
+/* caller should call f2fs_lock_op() */
 void handle_failed_inode(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
@@ -393,6 +406,17 @@ void handle_failed_inode(struct inode *inode)
 	if (!err)
 		err = remove_inode_page(inode);
 
+	/*
+	 * if we skip truncate_node in remove_inode_page bacause we failed
+	 * before, it's better to find another way to release resource of
+	 * this inode (e.g. valid block count, node block or nid). Here we
+	 * choose to add this inode to orphan list, so that we can call iput
+	 * for releasing in orphan recovery flow.
+	 *
+	 * Note: we should add inode to orphan list before f2fs_unlock_op()
+	 * so we can prevent losing this orphan when encoutering checkpoint
+	 * and following suddenly power-off.
+	 */
 	if (err && err != -ENOENT) {
 		err = acquire_orphan_inode(sbi);
 		if (!err)
@@ -402,6 +426,6 @@ void handle_failed_inode(struct inode *inode)
 	set_inode_flag(F2FS_I(inode), FI_FREE_NID);
 	f2fs_unlock_op(sbi);
 
-	
+	/* iput will drop the inode object */
 	iput(inode);
 }

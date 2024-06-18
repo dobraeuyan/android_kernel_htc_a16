@@ -15,10 +15,13 @@
 
 #include <linux/module.h>
 #include "msm_led_flash.h"
+//HTC_START
 #include <linux/htc_flashlight.h>
+//HTC_END
 
 #define FLASH_NAME "camera-led-flash"
 
+/*#define CONFIG_MSMB_CAMERA_DEBUG*/
 #undef CDBG
 #ifdef CONFIG_MSMB_CAMERA_DEBUG
 #define CDBG(fmt, args...) pr_err(fmt, ##args)
@@ -29,9 +32,9 @@
 extern int32_t msm_led_torch_create_classdev(
 				struct platform_device *pdev, void *data);
 
-#if 1 
-static struct kobject *led_status_obj; 
-#endif 
+#if 1 //HTC_CAM_FEATURE_FLASH_RESTRICTION
+static struct kobject *led_status_obj; // tmp remove for fc-1
+#endif //HTC_CAM_FEATURE_FLASH_RESTRICTION
 
 static enum flash_type flashtype;
 static struct msm_led_flash_ctrl_t fctrl;
@@ -54,7 +57,7 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 {
 	int rc = 0;
 	struct msm_camera_led_cfg_t *cfg = (struct msm_camera_led_cfg_t *)data;
-#ifndef CONFIG_HTC_FLASHLIGHT_COMMON 
+#ifndef CONFIG_HTC_FLASHLIGHT_COMMON //HTC_CAM_START
 	uint32_t i;
 	uint32_t curr_l, max_curr_l;
 #endif
@@ -68,12 +71,12 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 
 	switch (cfg->cfgtype) {
 	case MSM_CAMERA_LED_OFF:
-		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON 
-		
+		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON //HTC_CAM_START
+		/* Flash off */
 		for (i = 0; i < fctrl->flash_num_sources; i++)
 			if (fctrl->flash_trigger[i])
 				led_trigger_event(fctrl->flash_trigger[i], 0);
-		
+		/* Torch off */
 		for (i = 0; i < fctrl->torch_num_sources; i++)
 			if (fctrl->torch_trigger[i])
 				led_trigger_event(fctrl->torch_trigger[i], 0);
@@ -86,11 +89,11 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 		else
 			pr_err("[CAM][FL] MSM_CAMERA_LED_OFF, flashlight control is NULL\n");
 
-		#endif 
+		#endif //HTC_CAM_END
 		break;
 
 	case MSM_CAMERA_LED_LOW:
-		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON 
+		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON //HTC_CAM_START
 		for (i = 0; i < fctrl->torch_num_sources; i++)
 			if (fctrl->torch_trigger[i]) {
 				max_curr_l = fctrl->torch_max_current[i];
@@ -113,12 +116,12 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 		else
 			pr_err("[CAM][FL] MSM_CAMERA_LED_LOW, flashlight control is NULL\n");
 
-		#endif 
+		#endif //HTC_CAM_END
 		break;
 
 	case MSM_CAMERA_LED_HIGH:
-		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON 
-		
+		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON //HTC_CAM_START
+		/* Torch off */
 		for (i = 0; i < fctrl->torch_num_sources; i++)
 			if (fctrl->torch_trigger[i])
 				led_trigger_event(fctrl->torch_trigger[i], 0);
@@ -142,7 +145,7 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
         if(htc_flash_main)
         {
             if (cfg->ma_value == 0)
-                htc_flash_main(750,0); 
+                htc_flash_main(750,0); // by HW bob request change to 750
             else{
             int led1 = (int)cfg->ma_value & 0xFFFF;
             int led2 = (cfg->ma_value & 0xFFFF0000)>>16;
@@ -156,23 +159,23 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
         }
         else
             pr_err("[CAM][FL] MSM_CAMERA_LED_HIGH, flashlight control is NULL\n");
-        #endif 
+        #endif //HTC_CAM_END
 
 		break;
 
 	case MSM_CAMERA_LED_INIT:
 	case MSM_CAMERA_LED_RELEASE:
-		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON 
-		
+		#ifndef CONFIG_HTC_FLASHLIGHT_COMMON //HTC_CAM_START
+		/* Flash off */
 		for (i = 0; i < fctrl->flash_num_sources; i++)
 			if (fctrl->flash_trigger[i])
 				led_trigger_event(fctrl->flash_trigger[i], 0);
-		
+		/* Torch off */
 		for (i = 0; i < fctrl->torch_num_sources; i++)
 			if (fctrl->torch_trigger[i])
 				led_trigger_event(fctrl->torch_trigger[i], 0);
 		#else
-		
+		//tps61310_flashlight_control(FL_MODE_OFF);
 		if(htc_flash_main && htc_torch_main)
 		{
 			htc_flash_main(0,0);
@@ -180,14 +183,14 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 		}
 		else
 			pr_err("[CAM][FL] MSM_CAMERA_LED_INIT/RELEASE, flashlight control is NULL\n");
-		#endif 
+		#endif //HTC_CAM_END
 		break;
 
 	default:
 		rc = -EFAULT;
 		break;
 	}
-	pr_info("[CAM][FL] flash_set_led_state: return %d\n", rc); 
+	pr_info("[CAM][FL] flash_set_led_state: return %d\n", rc); //HTC Modify
 	return rc;
 }
 
@@ -214,7 +217,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 	uint32_t count = 0;
 	struct led_trigger *temp = NULL;
 
-	pr_info("[CAM][FL] called\n"); 
+	pr_info("[CAM][FL] called\n"); //HTC Modify
 
 	if (!of_node) {
 		pr_err("of_node NULL\n");
@@ -239,7 +242,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	
+	/* Flash source */
 	if (of_get_property(of_node, "qcom,flash-source", &count)) {
 		count /= sizeof(uint32_t);
 		CDBG("qcom,flash-source count %d\n", count);
@@ -273,7 +276,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 				fctrl.flash_trigger_name[i]);
 
 			if (flashtype == GPIO_FLASH) {
-				
+				/* use fake current */
 				fctrl.flash_op_current[i] = LED_FULL;
 			} else {
 				rc = of_property_read_u32(flash_src_node,
@@ -303,7 +306,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 		}
 
 	}
-	
+	/* Torch source */
 	if (of_get_property(of_node, "qcom,torch-source", &count)) {
 		count /= sizeof(uint32_t);
 		CDBG("qcom,torch-source count %d\n", count);
@@ -338,7 +341,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 				fctrl.torch_trigger_name[i]);
 
 			if (flashtype == GPIO_FLASH) {
-				
+				/* use fake current */
 				fctrl.torch_op_current[i] = LED_HALF;
 			} else {
 				rc = of_property_read_u32(flash_src_node,
@@ -377,7 +380,7 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 	return rc;
 }
 
-#if 1 
+#if 1 //HTC_CAM_FEATURE_FLASH_RESTRICTION
 
 static uint32_t led_ril_status_value;
 static uint32_t led_wimax_status_value;
@@ -441,7 +444,7 @@ static ssize_t led_hotspot_status_set(struct device *dev,
 {
 	uint32_t tmp = 0;
 
-	tmp = buf[0] - 0x30; 
+	tmp = buf[0] - 0x30; /* only get the first char */
 
 	led_hotspot_status_value = tmp;
 	pr_info("[CAM][FL] led_hotspot_status_value = %d\n", led_hotspot_status_value);
@@ -560,11 +563,11 @@ error:
 	return ret;
 
 }
-#endif 
+#endif //HTC_CAM_FEATURE_FLASH_RESTRICTION
 
 static int __init msm_led_trigger_add_driver(void)
 {
-    #if 0 
+    #if 0 //HTC_CAM_START
 	CDBG("called\n");
 	return platform_driver_probe(&msm_led_trigger_driver,
 		msm_led_trigger_probe);
@@ -579,7 +582,7 @@ static int __init msm_led_trigger_add_driver(void)
 	pr_err("%s:%d rc %d\n", __func__, __LINE__, rc);
 	return rc;
 
-    #endif 
+    #endif //HTC_CAM_FEATURE_FLASH_RESTRICTION
 }
 
 static struct msm_flash_fn_t msm_led_trigger_func_tbl = {

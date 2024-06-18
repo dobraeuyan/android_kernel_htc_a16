@@ -35,6 +35,9 @@
 #include "f2fs_crypto.h"
 #include "xattr.h"
 
+/**
+ * f2fs_dir_crypt_complete() -
+ */
 static void f2fs_dir_crypt_complete(struct crypto_async_request *req, int res)
 {
 	struct f2fs_completion_result *ecr = req->data;
@@ -56,6 +59,13 @@ static unsigned max_name_len(struct inode *inode)
 					F2FS_NAME_LEN;
 }
 
+/**
+ * f2fs_fname_encrypt() -
+ *
+ * This function encrypts the input filename, and returns the length of the
+ * ciphertext. Errors are returned as negative numbers.  We trust the caller to
+ * allocate sufficient memory to oname string.
+ */
 static int f2fs_fname_encrypt(struct inode *inode,
 			const struct qstr *iname, struct f2fs_str *oname)
 {
@@ -88,7 +98,7 @@ static int f2fs_fname_encrypt(struct inode *inode,
 		workbuf = alloc_buf;
 	}
 
-	
+	/* Allocate request */
 	req = ablkcipher_request_alloc(tfm, GFP_NOFS);
 	if (!req) {
 		printk_ratelimited(KERN_ERR
@@ -100,15 +110,15 @@ static int f2fs_fname_encrypt(struct inode *inode,
 			CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
 			f2fs_dir_crypt_complete, &ecr);
 
-	
+	/* Copy the input */
 	memcpy(workbuf, iname->name, iname->len);
 	if (iname->len < ciphertext_len)
 		memset(workbuf + iname->len, 0, ciphertext_len - iname->len);
 
-	
+	/* Initialize IV */
 	memset(iv, 0, F2FS_CRYPTO_BLOCK_SIZE);
 
-	
+	/* Create encryption request */
 	sg_init_one(&src_sg, workbuf, ciphertext_len);
 	sg_init_one(&dst_sg, oname->name, ciphertext_len);
 	ablkcipher_request_set_crypt(req, &src_sg, &dst_sg, ciphertext_len, iv);
@@ -128,6 +138,13 @@ static int f2fs_fname_encrypt(struct inode *inode,
 	return res;
 }
 
+/*
+ * f2fs_fname_decrypt()
+ *	This function decrypts the input filename, and returns
+ *	the length of the plaintext.
+ *	Errors are returned as negative numbers.
+ *	We trust the caller to allocate sufficient memory to oname string.
+ */
 static int f2fs_fname_decrypt(struct inode *inode,
 			const struct f2fs_str *iname, struct f2fs_str *oname)
 {
@@ -143,7 +160,7 @@ static int f2fs_fname_decrypt(struct inode *inode,
 	if (iname->len <= 0 || iname->len > lim)
 		return -EIO;
 
-	
+	/* Allocate request */
 	req = ablkcipher_request_alloc(tfm, GFP_NOFS);
 	if (!req) {
 		printk_ratelimited(KERN_ERR
@@ -154,10 +171,10 @@ static int f2fs_fname_decrypt(struct inode *inode,
 		CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
 		f2fs_dir_crypt_complete, &ecr);
 
-	
+	/* Initialize IV */
 	memset(iv, 0, F2FS_CRYPTO_BLOCK_SIZE);
 
-	
+	/* Create decryption request */
 	sg_init_one(&src_sg, iname->name, iname->len);
 	sg_init_one(&dst_sg, oname->name, oname->len);
 	ablkcipher_request_set_crypt(req, &src_sg, &dst_sg, iname->len, iv);
@@ -182,6 +199,12 @@ static int f2fs_fname_decrypt(struct inode *inode,
 static const char *lookup_table =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
 
+/**
+ * f2fs_fname_encode_digest() -
+ *
+ * Encodes the input digest using characters from the set [a-zA-Z0-9_+].
+ * The encoded string is roughly 4/3 times the size of the input string.
+ */
 static int digest_encode(const char *src, int len, char *dst)
 {
 	int i = 0, bits = 0, ac = 0;
@@ -226,11 +249,22 @@ static int digest_decode(const char *src, int len, char *dst)
 	return cp - dst;
 }
 
+/**
+ * f2fs_fname_crypto_round_up() -
+ *
+ * Return: The next multiple of block size
+ */
 u32 f2fs_fname_crypto_round_up(u32 size, u32 blksize)
 {
 	return ((size + blksize - 1) / blksize) * blksize;
 }
 
+/**
+ * f2fs_fname_crypto_alloc_obuff() -
+ *
+ * Allocates an output buffer that is sufficient for the crypto operation
+ * specified by the context and the direction.
+ */
 int f2fs_fname_crypto_alloc_buffer(struct inode *inode,
 				   u32 ilen, struct f2fs_str *crypto_str)
 {
@@ -246,12 +280,19 @@ int f2fs_fname_crypto_alloc_buffer(struct inode *inode,
 	crypto_str->len = olen;
 	if (olen < F2FS_FNAME_CRYPTO_DIGEST_SIZE * 2)
 		olen = F2FS_FNAME_CRYPTO_DIGEST_SIZE * 2;
+	/* Allocated buffer can hold one more character to null-terminate the
+	 * string */
 	crypto_str->name = kmalloc(olen + 1, GFP_NOFS);
 	if (!(crypto_str->name))
 		return -ENOMEM;
 	return 0;
 }
 
+/**
+ * f2fs_fname_crypto_free_buffer() -
+ *
+ * Frees the buffer allocated for crypto operation.
+ */
 void f2fs_fname_crypto_free_buffer(struct f2fs_str *crypto_str)
 {
 	if (!crypto_str)
@@ -260,6 +301,9 @@ void f2fs_fname_crypto_free_buffer(struct f2fs_str *crypto_str)
 	crypto_str->name = NULL;
 }
 
+/**
+ * f2fs_fname_disk_to_usr() - converts a filename from disk space to user space
+ */
 int f2fs_fname_disk_to_usr(struct inode *inode,
 			f2fs_hash_t *hash,
 			const struct f2fs_str *iname,
@@ -296,6 +340,9 @@ int f2fs_fname_disk_to_usr(struct inode *inode,
 	return ret + 1;
 }
 
+/**
+ * f2fs_fname_usr_to_disk() - converts a filename from user space to disk space
+ */
 int f2fs_fname_usr_to_disk(struct inode *inode,
 			const struct qstr *iname,
 			struct f2fs_str *oname)
@@ -314,6 +361,9 @@ int f2fs_fname_usr_to_disk(struct inode *inode,
 		res = f2fs_fname_encrypt(inode, iname, oname);
 		return res;
 	}
+	/* Without a proper key, a user is not allowed to modify the filenames
+	 * in a directory. Consequently, a user space name cannot be mapped to
+	 * a disk-space name */
 	return -EACCES;
 }
 
@@ -350,6 +400,9 @@ int f2fs_fname_setup_filename(struct inode *dir, const struct qstr *iname,
 	if (!lookup)
 		return -EACCES;
 
+	/* We don't have the key and we are doing a lookup; decode the
+	 * user-supplied name
+	 */
 	if (iname->name[0] == '_')
 		bigname = 1;
 	if ((bigname && (iname->len != 33)) ||

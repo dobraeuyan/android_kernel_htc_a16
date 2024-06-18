@@ -41,4 +41,4 @@ void htc_panel_info(const char *panel);
 void htc_mdp3_get_mode(u32 *mode);
 void htc_mdp3_perf(void);
 
-#endif 
+#endif /* MDSS_FB_H */

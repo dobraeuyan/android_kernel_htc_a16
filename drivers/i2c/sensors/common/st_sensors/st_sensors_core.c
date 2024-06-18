@@ -221,13 +221,13 @@ int st_sensors_init_sensor(struct iio_dev *indio_dev)
 	if (err < 0)
 		goto init_error;
 
-	
+	/* set BDU */
 	err = st_sensors_write_data_with_mask(indio_dev,
 			sdata->sensor->bdu.addr, sdata->sensor->bdu.mask, true);
 	if (err < 0)
 		goto init_error;
 
-	
+	/* set High Resolution mode */
 	err = st_sensors_write_data_with_mask(indio_dev, ST_ACCEL_1_HRM_ADDR, ST_ACCEL_1_HRM_MASK, true);
 	if (err < 0)
 		goto init_error;
@@ -244,7 +244,7 @@ int st_sensors_set_dataready_irq(struct iio_dev *indio_dev, bool enable)
 	int err;
 	struct st_sensor_data *sdata = iio_priv(indio_dev);
 
-	
+	/* Enable/Disable the interrupt generator 1. */
 	if (sdata->sensor->drdy_irq.ig1.en_addr > 0) {
 		err = st_sensors_write_data_with_mask(indio_dev,
 			sdata->sensor->drdy_irq.ig1.en_addr,
@@ -253,7 +253,7 @@ int st_sensors_set_dataready_irq(struct iio_dev *indio_dev, bool enable)
 			goto st_accel_set_dataready_irq_error;
 	}
 
-	
+	/* Enable/Disable the interrupt generator for data ready. */
 	err = st_sensors_write_data_with_mask(indio_dev,
 			sdata->sensor->drdy_irq.addr,
 			sdata->sensor->drdy_irq.mask, (int)enable);

@@ -22,6 +22,7 @@
 #define FALSE       0
 #define TRUE        1
 
+/* USB current limit*/
 #define USB_MA_0       (0)
 #define USB_MA_2       (2)
 #define USB_MA_100     (100)
@@ -65,8 +66,8 @@ int smb358_charger_get_attr_text(char *buf, int size);
 int smb358_set_charger_after_eoc(bool enable);
 int smb358_is_hv_battery_detection(int *result);
 int pm8909_set_hsml_target_ma(int target_ma);
-#endif
-#else 
+#endif/* CONFIG_HTC_BATT_8960 */
+#else /* CONFIG_SMB358_CHARGER */
 #ifdef CONFIG_HTC_BATT_8960
 static inline int smb358_get_batt_temperature(int *result)
 {
@@ -169,7 +170,7 @@ static inline int pm8909_set_hsml_target_ma(int target_ma)
 {
 	return -ENXIO;
 }
-#endif 
-#endif 
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
+#endif /* CONFIG_SMB358_CHARGER */
+#endif /* __SMB358_CHARGER_H */
 

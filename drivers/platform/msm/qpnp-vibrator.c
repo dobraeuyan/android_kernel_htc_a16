@@ -106,7 +106,7 @@ static int qpnp_vibrator_config(struct qpnp_vib *vib)
 	u8 reg = 0;
 	int rc;
 
-	
+	/* Configure the VTG CTL regiser */
 	rc = qpnp_vib_read_u8(vib, &reg, QPNP_VIB_VTG_CTL(vib->base));
 	if (rc < 0)
 		return rc;
@@ -118,7 +118,7 @@ static int qpnp_vibrator_config(struct qpnp_vib *vib)
 	VIB_INFO_LOG("%s: VTG=0x%x\n", __func__, reg);
 	vib->reg_vtg_ctl = reg;
 
-	
+	/* Configure the VIB ENABLE regiser */
 	rc = qpnp_vib_read_u8(vib, &reg, QPNP_VIB_EN_CTL(vib->base));
 	if (rc < 0)
 		return rc;
@@ -251,7 +251,7 @@ static int qpnp_vibrator_suspend(struct device *dev)
 
 	hrtimer_cancel(&vib->vib_timer);
 	cancel_work_sync(&vib->work);
-	
+	/* turn-off vibrator */
 	qpnp_vib_set(vib, 0);
 
 	return 0;

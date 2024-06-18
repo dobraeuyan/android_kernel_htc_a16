@@ -32,7 +32,7 @@ struct msm_sensor_power_setting s5k5e_htc_power_setting[] = {
     },
     {
         .seq_type = SENSOR_GPIO,
-        .seq_val = SENSOR_GPIO_CUSTOM1,
+        .seq_val = SENSOR_GPIO_CUSTOM1,//GPIO 8 , cam analog
         .config_val = GPIO_OUT_HIGH,
         .delay = 1,
     },
@@ -44,13 +44,13 @@ struct msm_sensor_power_setting s5k5e_htc_power_setting[] = {
     },
     {
         .seq_type = SENSOR_GPIO,
-        .seq_val = SENSOR_GPIO_RESET,
+        .seq_val = SENSOR_GPIO_RESET,//GPIO 28
         .config_val = GPIO_OUT_HIGH,
         .delay = 5,
     },
     {
         .seq_type = SENSOR_CLK,
-        .seq_val = SENSOR_CAM_MCLK, 
+        .seq_val = SENSOR_CAM_MCLK, //gpio 27
         .config_val = 0,
         .delay = 5,
     },
@@ -66,7 +66,7 @@ struct msm_sensor_power_setting s5k5e_htc_power_setting[] = {
 struct msm_sensor_power_setting s5k5e_htc_power_setting[] = {
 	{
 		.seq_type = SENSOR_GPIO,
-		.seq_val = SENSOR_GPIO_CUSTOM1,
+		.seq_val = SENSOR_GPIO_CUSTOM1,//CAM1_SID GPIO 23
 		.config_val = GPIO_OUT_HIGH,
 		.delay = 5,
 	},
@@ -90,13 +90,13 @@ struct msm_sensor_power_setting s5k5e_htc_power_setting[] = {
 	},
 	{
 		.seq_type = SENSOR_GPIO,
-		.seq_val = SENSOR_GPIO_RESET,
+		.seq_val = SENSOR_GPIO_RESET,//GPIO 35
 		.config_val = GPIO_OUT_HIGH,
 		.delay = 5,
 	},
 	{
 		.seq_type = SENSOR_GPIO,
-		.seq_val = SENSOR_GPIO_CUSTOM2,
+		.seq_val = SENSOR_GPIO_CUSTOM2,//CAM_SEL GPIO 8
 		.config_val = GPIO_OUT_HIGH,
 		.delay = 5,
 	},
@@ -160,10 +160,10 @@ static int32_t s5k5e_htc_platform_probe(struct platform_device *pdev)
 	int32_t rc = 0;
 	const struct of_device_id *match;
 	match = of_match_device(s5k5e_htc_dt_match, &pdev->dev);
-       
+       /*htc start: clean_li added for klocwork issue 3547*/
        if(!match)
                return -ENODEV;
-       
+       /*htc end: clean_li added for klocwork issue 3547*/
 	rc = msm_sensor_platform_probe(pdev, match->data);
 	return rc;
 }

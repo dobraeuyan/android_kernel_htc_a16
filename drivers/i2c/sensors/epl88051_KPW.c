@@ -40,9 +40,12 @@
 #include <linux/platform_device.h>
 #include <linux/of_gpio.h>
 
-#define PS_RAW_8BIT     	0   	
-#define ALS_POLLING_MODE	0	
-#define PS_POLLING_MODE         0	
+/******************************************************************************
+* configuration
+*******************************************************************************/
+#define PS_RAW_8BIT     	0   	//0:16bit, 1:8bit
+#define ALS_POLLING_MODE	0	// 1 is polling mode, 0 is interrupt mode
+#define PS_POLLING_MODE         0	// 1 is polling mode, 0 is interrupt mode
 
 #define ALS_LOW_THRESHOLD	1000
 #define ALS_HIGH_THRESHOLD	3000
@@ -56,6 +59,7 @@
 #endif
 #define LUX_PER_COUNT		700
 
+//platform select
 #define S5PV210 		0
 #define ZERADUG 		0
 #define QCOM   			1
@@ -63,6 +67,7 @@
 #define HTC_ATTR 		1
 #define HTC_ALS     		1
 
+//debug message
 #define COMMON_DEBUG 		0
 #define ALS_DEBUG   		0
 #define PS_DEBUG    		0
@@ -88,7 +93,7 @@ static struct mutex als_get_adc_mutex;
 unsigned long als_intr_level[] = {15, 39, 63, 316, 639, 4008, 5748, 10772, 14517, 65535};
 static uint32_t adctable[10] = {0};
 static uint32_t luxtable[10] = {0, 4, 10, 16, 75, 150, 1000, 1500, 2700, 4070};
-uint32_t golden_adc = 0xE43; 
+uint32_t golden_adc = 0xE43; //3651, lux per count = 3.651
 
 #endif
 
@@ -96,8 +101,9 @@ int als_frame_time = 0;
 int ps_frame_time  = 0;
 
 #if ALS_DYN_INTT
+//Dynamic INTT
 int dynamic_intt_idx;
-int dynamic_intt_init_idx = 0;	
+int dynamic_intt_init_idx = 0;	//initial dynamic_intt_idx
 int c_gain;
 int dynamic_intt_lux = 0;
 
@@ -162,14 +168,18 @@ static int debug_flag = 0;
 bool polling_flag = true;
 bool eint_flag = true;
 
+//ps calibration file location
 static const char ps_cal_file[]="/data/data/com.eminent.ps.calibration/ps.dat";
 
+//als calibration file location
 static const char als_cal_file[]="/data/data/com.eminent.ps.calibration/als.dat";
 
 static int PS_h_offset = 2000;
 static int PS_l_offset = 1000;
 static int PS_MAX_XTALK = 30000;
 
+/******************************************************************************
+*******************************************************************************/
 
 #define TXBYTES			2
 #define RXBYTES			2
@@ -178,6 +188,8 @@ static int PS_MAX_XTALK = 30000;
 #define I2C_RETRY_COUNT 	10
 #define EPL_DEV_NAME		"EPL88051_KPW"
 #define DRIVER_VERSION          "1.1.5"
+//struct timeval  ges_enable_time;
+//int ges_frame_count;
 
 static int PS_DEBUG_FLAG = 0;
 static int ALS_DEBUG_FLAG = 0;
@@ -263,10 +275,10 @@ struct epl_sensor_priv
 #if ALS_DYN_INTT
 	uint32_t ratio;
 	uint32_t last_ratio;
-	int c_gain_h;			
-	int c_gain_l; 			
-	uint32_t lsource_thd_high;	
-	uint32_t lsource_thd_low;	
+	int c_gain_h;			// fluorescent 	(C1)
+	int c_gain_l; 			// incandescent (C2)
+	uint32_t lsource_thd_high;	//different light source boundary (N) fluorescent  (C1)
+	uint32_t lsource_thd_low;	//different light source boundary (N) incandescent (C2)
 	u8 als_init_cycle;
 	u8 als_cycle;
 #endif
@@ -291,7 +303,7 @@ struct epl_sensor_priv
 	u8       ps_hd;
 	u8       ps_led_current;
 #endif
-	
+	/*data*/
 	u16 als_level_num;
 	u16 als_value_num;
 	u32 als_level[ALS_LEVEL-1];
@@ -344,6 +356,9 @@ static int lightsensor_update_table(struct epl_sensor_priv *epld);
 #endif
 
 int als_thd_add = 50;
+/*
+//====================I2C write operation===============//
+*/
 static int epl_sensor_I2C_Write_Cmd(struct i2c_client *client, uint8_t regaddr, uint8_t data, uint8_t txbyte)
 {
     uint8_t buffer[2];
@@ -383,6 +398,7 @@ static int epl_sensor_I2C_Write(struct i2c_client *client, uint8_t regaddr, uint
     return ret;
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_I2C_Read(struct i2c_client *client, uint8_t regaddr, uint8_t bytecount)
 {
 
@@ -420,15 +436,18 @@ static int epl_sensor_I2C_Read(struct i2c_client *client, uint8_t regaddr, uint8
     return ret;
 }
 
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_restart_polling(void)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
 	cancel_delayed_work(&epld->polling_work);
-	
+	//schedule_delayed_work(&epld->polling_work, msecs_to_jiffies(50));
 	if (epld->lp_wq)
 		queue_delayed_work(epld->lp_wq, &epld->polling_work, msecs_to_jiffies(50));
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_report_lux(int repott_lux)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -441,6 +460,7 @@ static void epl_sensor_report_lux(int repott_lux)
     input_report_abs(epld->als_input_dev, ABS_MISC, repott_lux);
     input_sync(epld->als_input_dev);
 }
+/*----------------------------------------------------------------------------*/
 #if ALS_DYN_INTT
 long raw_convert_to_lux(u16 raw_data)
 {
@@ -456,16 +476,16 @@ long raw_convert_to_lux(u16 raw_data)
     {
         gain_value = 1;
     }
-    
-    dyn_intt_raw = raw_data/(gain_value *als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); 
+    //dyn_intt_raw = raw_data/als_dynamic_intt_value[dynamic_intt_idx];
+    dyn_intt_raw = raw_data/(gain_value *als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); // for HTC
 
     if(dyn_intt_raw > 0xffff)
         epl_sensor.als.dyn_intt_raw = 0xffff;
     else
         epl_sensor.als.dyn_intt_raw = dyn_intt_raw;
 
-    
-    lux = raw_data * (c_gain / (gain_value * als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1])); 
+    //lux = raw_data * (c_gain / als_dynamic_intt_value[dynamic_intt_idx]);
+    lux = raw_data * (c_gain / (gain_value * als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1])); //for HTC
 
     if(ALS_DEBUG_FLAG) {
 	LOG_INFO("[%s]:dyn_intt_raw=%ld, epl_sensor.als.dyn_intt_raw=%d \r\n",
@@ -492,6 +512,7 @@ long raw_convert_to_lux(u16 raw_data)
     return lux;
 }
 #endif
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 {
 	int idx;
@@ -542,7 +563,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 				epl_sensor.als.data.channels[0] = 1;
 				LOG_ERR("[%s]:read ch0 data is 0 \r\n", __func__);
 			}
-			
+			//lux ratio (A=CH1/CH0)
 			luxratio = (long)((als*dynamic_intt_min_unit) /
 						 epl_sensor.als.data.channels[0]);
 			obj->ratio = luxratio;
@@ -556,10 +577,10 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 						obj->last_ratio = (luxratio + obj->last_ratio*9) / 10;
 
 					if (obj->last_ratio >= obj->lsource_thd_high) {
-						
+						//fluorescent (C1)
 						c_gain = obj->c_gain_h;
 					} else if (obj->last_ratio <= obj->lsource_thd_low) {
-						
+						//incandescent (C2)
 						c_gain = obj->c_gain_l;
 					} else if(epl_sensor.als.lsrc_type == CMC_BIT_LSRC_BOTH) {
 						int a = 0, b = 0, c = 0;
@@ -575,13 +596,13 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 					}
 				} else if(epl_sensor.als.lsrc_type == CMC_BIT_LSRC_SLOPE) {
 					if (luxratio >= obj->lsource_thd_high) {
-						
+						//fluorescent (C1)
 						c_gain = obj->c_gain_h;
 					} else if (luxratio <= obj->lsource_thd_low) {
-						
+						//incandescent (C2)
 						c_gain = obj->c_gain_l;
 					} else {
-						
+						/*mix*/
 						int a = 0, b = 0, c = 0;
 						a = (obj->c_gain_h - obj->c_gain_l) * dynamic_intt_min_unit / (obj->lsource_thd_high - obj->lsource_thd_low);
 						b = (obj->c_gain_h) - ((a * obj->lsource_thd_high)/dynamic_intt_min_unit );
@@ -627,7 +648,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 			}
 		} else if(als < dynamic_intt_low_thr) {
 			if(dynamic_intt_idx == 0) {
-				
+				//als = dynamic_intt_low_thr;
 				lux_tmp = raw_convert_to_lux(als);
 				if(ALS_DEBUG_FLAG)
 					LOG_INFO(">>>>>>>>>>>>>>>>>>>>>>>> INTT_MIN_LUX\r\n");
@@ -655,14 +676,14 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 			dynamic_intt_high_thr = als_dynamic_intt_high_thr[dynamic_intt_idx];
 			dynamic_intt_low_thr = als_dynamic_intt_low_thr[dynamic_intt_idx];
 			epl_sensor_update_mode(obj->client);
-			
+			//change_flag = false;
 		}
 #if !HTC_ALS
 		return dynamic_intt_lux;
 #else
         if(dynamic_intt_idx == 1)
         {
-            
+            //als_step = ((uint32_t)als) * obj->als_gadc / obj->als_kadc_high_lux;
 
             if (obj->ls_calibrate)
 		        als_step = epl_sensor.als.dyn_intt_raw;
@@ -691,7 +712,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
         			if (*(obj->adc_table_high_lux + i))
         				break;
         		}
-        		if (i == 9) {			
+        		if (i == 9) {			/*avoid  i = 10, because 'cali_table' of size is 10 */
         			level = i;
         			break;
     		    }
@@ -702,12 +723,12 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 		if(ALS_DEBUG_FLAG) {
 	            LOG_INFO("obj->als_gadc=%d,obj->als_kadc=%d \r\n", obj->als_gadc, obj->als_kadc);
 		}
-            
+            //als_step = ((uint32_t)als) * obj->als_gadc / obj->als_kadc;
             if (obj->ls_calibrate)
 			    als_step = epl_sensor.als.dyn_intt_raw;
     		else {
 #if 0
-    			als_step = epl_sensor.als.dyn_intt_raw * obj->als_gadc / obj->als_kadc;
+    			als_step = epl_sensor.als.dyn_intt_raw * obj->als_gadc / obj->als_kadc;//((uint32_t)als) * obj->als_gadc / obj->als_kadc;
 #else
                 als_step = epl_sensor.als.dyn_intt_raw * obj->als_gadc / obj->als_kadc_high_lux;
 #endif
@@ -730,7 +751,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
         			if (*(obj->adc_table + i))
         				break;
         		}
-        		if (i == 9) {			
+        		if (i == 9) {			/*avoid  i = 10, because 'cali_table' of size is 10 */
         			level = i;
         			break;
     		    }
@@ -786,7 +807,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 				if (*(obj->adc_table + i))
 					break;
 			}
-			if (i == 9) {			
+			if (i == 9) {			/*avoid  i = 10, because 'cali_table' of size is 10 */
 				level = i;
 				break;
 			}
@@ -798,7 +819,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 				if (*(obj->adc_table_high_lux + i))
 					break;
 			}
-			if (i == 9) {			
+			if (i == 9) {			/*avoid  i = 10, because 'cali_table' of size is 10 */
 				level = i;
 				break;
 			}
@@ -815,6 +836,7 @@ static int epl_sensor_get_als_value(struct epl_sensor_priv *obj, u16 als)
 	}
 	return 0;
 }
+/*----------------------------------------------------------------------------*/
 
 int epl_sensor_read_als(struct i2c_client *client)
 {
@@ -841,6 +863,7 @@ int epl_sensor_read_als(struct i2c_client *client)
 	return 0;
 }
 
+/*----------------------------------------------------------------------------*/
 
 static void epl_sensor_report_ps_status(void)
 {
@@ -923,6 +946,7 @@ int epl_sensor_read_ps_status(struct i2c_client *client)
 	return 0;
 }
 
+/*----------------------------------------------------------------------------*/
 
 static int set_psensor_intr_threshold(uint16_t low_thd, uint16_t high_thd)
 {
@@ -1022,7 +1046,7 @@ static int write_factory_calibration(struct epl_sensor_priv *epl_data, char* ps_
 	LOG_FUN();
     pos = 0;
 
-	fp_cal = filp_open(ps_cal_file, O_CREAT|O_RDWR|O_TRUNC, 0755);
+	fp_cal = filp_open(ps_cal_file, O_CREAT|O_RDWR|O_TRUNC, 0755/*S_IRWXU*/);
 	if (IS_ERR(fp_cal))
 	{
 		LOG_ERR("[ELAN]create file_h error\n");
@@ -1190,19 +1214,22 @@ static int epl_run_ps_calibration(struct epl_sensor_priv *epl_data)
 }
 
 
+/*
+//====================write global variable===============//
+*/
 static void write_global_variable(struct i2c_client *client)
 {
 	u8 buf;
 
-	
+	//wake up chip
 	buf = epl_sensor.reset | epl_sensor.power;
 	epl_sensor_I2C_Write(client,0x11, buf);
 
-	
+	/* read revno*/
 	epl_sensor_I2C_Read(client, 0x20, 2);
 	epl_sensor.revno = gRawData.raw_bytes[0] | gRawData.raw_bytes[1] << 8;
 
-	
+	/*chip refrash*/
 	epl_sensor_I2C_Write(client, 0xfd, 0x8e);
 	epl_sensor_I2C_Write(client, 0xfe, 0x22);
 	epl_sensor_I2C_Write(client, 0xfe, 0x02);
@@ -1210,7 +1237,7 @@ static void write_global_variable(struct i2c_client *client)
 
 	epl_sensor_I2C_Write(client, 0xfc, EPL_A_D | EPL_NORMAL| EPL_GFIN_ENABLE | EPL_VOS_ENABLE | EPL_DOC_ON);
 
-	
+	/*ps setting*/
 	buf = epl_sensor.ps.integration_time | epl_sensor.ps.gain;
 	epl_sensor_I2C_Write(client,0x03, buf);
 
@@ -1230,7 +1257,7 @@ static void write_global_variable(struct i2c_client *client)
 	epl_sensor_I2C_Write(client,0x23, (u8)((epl_sensor.ps.cancelation & 0xff0) >> 8));
 	set_psensor_intr_threshold(epl_sensor.ps.low_threshold, epl_sensor.ps.high_threshold);
 
-	
+	/*als setting*/
 	buf = epl_sensor.als.integration_time | epl_sensor.als.gain;
 	epl_sensor_I2C_Write(client,0x01, buf);
 
@@ -1245,7 +1272,7 @@ static void write_global_variable(struct i2c_client *client)
 
 	set_lsensor_intr_threshold(epl_sensor.als.low_threshold, epl_sensor.als.high_threshold);
 
-	
+	//set mode and wait
 	buf = epl_sensor.wait | epl_sensor.mode;
 	epl_sensor_I2C_Write(client,0x00, buf);
 }
@@ -1253,28 +1280,28 @@ static void write_global_variable(struct i2c_client *client)
 static void set_als_ps_intr_type(struct i2c_client *client, bool ps_polling, bool als_polling)
 {
 
-    
+    //set als / ps interrupt control mode and trigger type
 	switch((ps_polling << 1) | als_polling)
 	{
-		case 0: 
+		case 0: // ps and als interrupt
 			epl_sensor.interrupt_control = 	EPL_INT_CTRL_ALS_OR_PS;
 			epl_sensor.als.interrupt_type = EPL_INTTY_ACTIVE;
 			epl_sensor.ps.interrupt_type = EPL_INTTY_ACTIVE;
 		break;
 
-		case 1: 
+		case 1: //ps interrupt and als polling
 			epl_sensor.interrupt_control = 	EPL_INT_CTRL_PS;
 			epl_sensor.als.interrupt_type = EPL_INTTY_DISABLE;
 			epl_sensor.ps.interrupt_type = EPL_INTTY_ACTIVE;
 		break;
 
-		case 2: 
+		case 2: // ps polling and als interrupt
 			epl_sensor.interrupt_control = 	EPL_INT_CTRL_ALS;
 			epl_sensor.als.interrupt_type = EPL_INTTY_ACTIVE;
 			epl_sensor.ps.interrupt_type = EPL_INTTY_DISABLE;
 		break;
 
-		case 3: 
+		case 3: //ps and als polling
 			epl_sensor.interrupt_control = 	EPL_INT_CTRL_ALS_OR_PS;
 			epl_sensor.als.interrupt_type = EPL_INTTY_DISABLE;
 			epl_sensor.ps.interrupt_type = EPL_INTTY_DISABLE;
@@ -1282,16 +1309,17 @@ static void set_als_ps_intr_type(struct i2c_client *client, bool ps_polling, boo
 	}
 }
 
+//====================initial global variable===============//
 static void initial_global_variable(struct i2c_client *client, struct epl_sensor_priv *obj)
 {
-	
+	//general setting
 	epl_sensor.power   = EPL_POWER_ON;
 	epl_sensor.reset   = EPL_RESETN_RUN;
 	epl_sensor.mode    = EPL_MODE_IDLE;
 	epl_sensor.wait	   = EPL_WAIT_20_MS;
 	epl_sensor.osc_sel = EPL_OSC_SEL_1MHZ;
 
-	
+	//als setting
 	epl_sensor.als.polling_mode 		= ALS_POLLING_MODE;
 	epl_sensor.als.integration_time 	= EPL_ALS_INTT_64;
 	epl_sensor.als.gain 			= EPL_GAIN_MID;
@@ -1303,10 +1331,10 @@ static void initial_global_variable(struct i2c_client *client, struct epl_sensor
 	epl_sensor.als.persist 			= EPL_PERIST_1;
 	epl_sensor.als.compare_reset 		= EPL_CMP_RESET;
 	epl_sensor.als.lock 			= EPL_UN_LOCK;
-	epl_sensor.als.report_type = CMC_BIT_DYN_INT; 
+	epl_sensor.als.report_type = CMC_BIT_DYN_INT; //CMC_BIT_LEVEL;//;CMC_BIT_RAW; //CMC_BIT_DYN_INT;
 	epl_sensor.als.high_threshold 		= ALS_HIGH_THRESHOLD;
 	epl_sensor.als.low_threshold 		= ALS_LOW_THRESHOLD;
-	
+	//als factory
 	epl_sensor.als.factory.calibration_enable = false;
 	epl_sensor.als.factory.calibrated	  = false;
 	epl_sensor.als.factory.lux_per_count 	  = LUX_PER_COUNT;
@@ -1322,14 +1350,14 @@ static void initial_global_variable(struct i2c_client *client, struct epl_sensor
 		dynamic_intt_low_thr 		= als_dynamic_intt_low_thr[dynamic_intt_idx];
 	}
 
-	c_gain			= 21000; 
-	obj->lsource_thd_high	= 15000; 
-	obj->lsource_thd_low	= 6500;  
-	obj->c_gain_h		= 21000; 
-	obj->c_gain_l		= 9000;  
+	c_gain			= 21000; // 21000/1000=21
+	obj->lsource_thd_high	= 15000; // different light source boundary (N) (15)
+	obj->lsource_thd_low	= 6500;  // 6.5
+	obj->c_gain_h		= 21000; // fluorescent  (C1) (21)
+	obj->c_gain_l		= 9000;  // incandescent (C2) (0.9)
 
 #endif
-	
+	//ps setting
 	epl_sensor.ps.polling_mode 	= PS_POLLING_MODE;
 #if HTC_ATTR
 	epl_sensor.ps.cycle 		= obj->ps_duty;
@@ -1351,7 +1379,7 @@ static void initial_global_variable(struct i2c_client *client, struct epl_sensor
 	epl_sensor.ps.high_threshold 	= PS_HIGH_THRESHOLD;
 	epl_sensor.ps.low_threshold 	= PS_LOW_THRESHOLD;
 	epl_sensor.ps.cancelation       = obj->inte_ps_canc;
-	
+	//ps factory
 	epl_sensor.ps.factory.calibration_enable = false;
 	epl_sensor.ps.factory.calibrated 	 = false;
 	epl_sensor.ps.factory.cancelation	 = 0;
@@ -1377,7 +1405,7 @@ static void initial_global_variable(struct i2c_client *client, struct epl_sensor
 #endif
 	set_als_ps_intr_type(client, epl_sensor.ps.polling_mode,
 					 epl_sensor.als.polling_mode);
-	
+	//write setting to sensor
 	write_global_variable(client);
 }
 
@@ -1419,12 +1447,12 @@ void epl_sensor_dynk_thd_polling_work(struct work_struct *work)
 			mutex_lock(&sensor_mutex);
 			epl_sensor_read_ps_status(obj->client);
 			epl_sensor_read_ps(obj->client);
-#if 1       
+#if 1       //ices add by 20150323
 			if(epl_sensor.ps.lock == EPL_LOCK) {
 				LOG_INFO("[%s]: PS LOCK \r\n", __func__);
-				
+				//PS unlock and run
 				epl_sensor_I2C_Write(obj->client, 0x1b, EPL_CMP_RUN | EPL_UN_LOCK);
-				
+				//ALS unlock and run
 				epl_sensor_I2C_Write(obj->client, 0x12, EPL_CMP_RUN | EPL_UN_LOCK);
 				epl_sensor_report_ps_status();
 			}
@@ -1474,6 +1502,8 @@ void epl_sensor_dynk_thd_polling_work(struct work_struct *work)
 }
 #endif
 
+/************************************************************************/
+//for 3637
 static int als_sensing_time(int intt, int adc, int cycle)
 {
     long sensing_us_time;
@@ -1552,6 +1582,7 @@ static int epl_sensor_get_wait_time(int ps_time, int als_time)
 
     return (wait_idx << 4);
 }
+/************************************************************************/
 
 void epl_sensor_update_mode(struct i2c_client *client)
 {
@@ -1564,58 +1595,67 @@ void epl_sensor_update_mode(struct i2c_client *client)
     LOG_INFO("[%s]: ++ mode selection =0x%x\n", __func__, enable_ps | (enable_als << 1));
     mutex_lock(&sensor_enable_mutex);
 
+    /***************** Enable/Disable process *****************
+     * step 1. Disable and reset H/W comparator flag and reset H/W interrupt flag
+     * step 2. Reset S/W flag
+     * step 3. Set IDLE
+     * step 4. Set operation mode and assign als / ps settings
+     * step 5. Unlock and run als / ps status
+     **********************************************************/
 
-    
-    
+    /* Disable and reset H/W comparator flag and reset H/W interrupt flag*/
+    //PS unlock and reset
     epl_sensor.ps.compare_reset = EPL_CMP_RESET;
     epl_sensor.ps.lock = EPL_UN_LOCK;
     epl_sensor_I2C_Write(epld->client, 0x1b, epl_sensor.ps.compare_reset |epl_sensor.ps.lock);
 
-    
+    //ALS unlock and reset
     epl_sensor.als.compare_reset = EPL_CMP_RESET;
     epl_sensor.als.lock = EPL_UN_LOCK;
     epl_sensor_I2C_Write(epld->client, 0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
 
+    /* "polling_flag" is used to prevent other polling process to
+       access ADC data while enalbe/disalbe process is runing. */
     polling_flag = false;
 
-    
+    /* To clear S/W interrupt flag */
     epl_sensor.ps.interrupt_flag = EPL_INT_CLEAR;
     epl_sensor.als.interrupt_flag = EPL_INT_CLEAR;
 
-    
+    /* To calculate the frame time, data-ready time */
     als_time = als_sensing_time(epl_sensor.als.integration_time, epl_sensor.als.adc, epl_sensor.als.cycle);
     ps_time = ps_sensing_time(epl_sensor.ps.integration_time, epl_sensor.ps.adc, epl_sensor.ps.cycle);
 
     als_frame_time = als_time;
     ps_frame_time = ps_time;
 
-    
+    /* Mode selection */
     switch((enable_als << 1) | enable_ps)
     {
-        case 0: 
+        case 0: //disable all
             epl_sensor.mode = EPL_MODE_IDLE;
             break;
 
-        case 1: 
+        case 1: //als = 0, ps = 1
             epl_sensor.mode = EPL_MODE_PS;
             break;
 
-        case 2: 
+        case 2: //als = 1, ps = 0
             epl_sensor.mode = EPL_MODE_ALS;
             break;
 
-        case 3: 
+        case 3: //als = 1, ps = 1
             epl_sensor.mode = EPL_MODE_ALS_PS;
             break;
     }
 
-    
+    /* Set the Chip to IDLE before writing PS/ALS settings to the Chip */
     epl_sensor_I2C_Write(epld->client, 0x00, epl_sensor.wait | EPL_MODE_IDLE);
 
-    
+    // Initilize the PS/ALS settings to Elan-defined data structure
     read_factory_calibration();
 
-    
+    // Assign the PS/ALS settings store in Elan-define data structure to Chip register
     LOG_INFO("[%s]: ALS cycle = %d \r\n", __func__, epl_sensor.als.cycle);
     epl_sensor_I2C_Write(epld->client, 0x02, epl_sensor.als.adc |
 					     epl_sensor.als.cycle);
@@ -1631,7 +1671,7 @@ void epl_sensor_update_mode(struct i2c_client *client)
 					       epl_sensor.als.gain);
 #endif
 
-    
+    /*********************************************************************/
     if(epl_sensor.mode == EPL_MODE_ALS_PS &&
        epl_sensor.als.polling_mode == 0 &&
        epl_sensor.ps.polling_mode == 0) {
@@ -1644,22 +1684,22 @@ void epl_sensor_update_mode(struct i2c_client *client)
         epl_sensor_I2C_Write(epld->client, 0x00, epl_sensor.wait | epl_sensor.mode);
 	LOG_INFO("[%s]: H/W wait-timer = %d\n", __func__, epl_sensor.wait);
     }
-    
+    /********************************************************************/
 
-    
-    
+    /* To restart H/W comparator flag and clear H/W interrupt flag again*/
+    //ALS unlock and run
     epl_sensor.als.compare_reset = EPL_CMP_RUN;
     epl_sensor.als.lock = EPL_UN_LOCK;
     epl_sensor_I2C_Write(epld->client, 0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
 
-    
+    //PS unlock and run
     epl_sensor.ps.compare_reset = EPL_CMP_RUN;
     epl_sensor.ps.lock = EPL_UN_LOCK;
     epl_sensor_I2C_Write(epld->client, 0x1b, epl_sensor.ps.compare_reset |epl_sensor.ps.lock);
 
     mutex_unlock(&sensor_enable_mutex);
 
-    
+    /* Conditioned debug log */
     if(COMMON_DEBUG_FLAG) {
 	if(enable_ps == 1) {
 	    LOG_INFO("[%s] PS:low_thd = %d, high_thd = %d \n",__func__,
@@ -1682,6 +1722,10 @@ void epl_sensor_update_mode(struct i2c_client *client)
 	LOG_INFO("[%s] reg0x1b= 0x%x \n", __func__, epl_sensor.ps.compare_reset | epl_sensor.ps.lock);
     }
 
+   /***********************************************************************************
+    * By HTC design, both proximity sensor and light sensor are interrupt mode,
+    * meaning the MCU won't trigger an interrupt unless it ready itself, so there
+    * is no need to spend a frame time waiting for CHIP to get ready itself.         */
     if(epl_sensor.mode == EPL_MODE_PS && epl_sensor.ps.polling_mode == 1)
     {
         msleep(ps_time);
@@ -1702,7 +1746,7 @@ void epl_sensor_update_mode(struct i2c_client *client)
     {
         epl_sensor_restart_polling();
     }
-    
+    /*********************************************************************************/
 
 #if PS_DYN_K
     if(enable_ps == 1) {
@@ -1710,14 +1754,15 @@ void epl_sensor_update_mode(struct i2c_client *client)
     }
 #endif
 #if HTC_ATTR
-    
+    /* FIXME: Initialize the p_staus only when the PS enable/disable scenario */
     p_status = 9;
 #endif
-    
+    /* Release the "polling_flag(refer to line 1612)"*/
     polling_flag = true;
     LOG_INFO("[%s]: --\n", __func__);
 }
 
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_polling_work(struct work_struct *work)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -1748,7 +1793,7 @@ static void epl_sensor_polling_work(struct work_struct *work)
 		int report_lux = 0;
 		if(polling_flag == true && eint_flag == true) {
 			mutex_lock(&sensor_mutex);
-        		
+        		//epl_sensor_read_als_status(client);   // for test
 			epl_sensor_read_als(client);
 			mutex_unlock(&sensor_mutex);
 			report_lux = epl_sensor_get_als_value(epld, epl_sensor.als.data.channels[1]);
@@ -1773,7 +1818,9 @@ static void epl_sensor_polling_work(struct work_struct *work)
 		LOG_INFO("disable sensor\n");
 	}
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static irqreturn_t epl_sensor_eint_func(int irqNo, void *handle)
 {
 	struct epl_sensor_priv *epld = (struct epl_sensor_priv*)handle;
@@ -1784,6 +1831,7 @@ static irqreturn_t epl_sensor_eint_func(int irqNo, void *handle)
 
 	return IRQ_HANDLED;
 }
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_intr_als_report_lux(void)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -1796,7 +1844,7 @@ static void epl_sensor_intr_als_report_lux(void)
 	epl_sensor_read_als(epld->client);
 	old_dynamic_intt_idx = dynamic_intt_idx;
 
-#if 1 
+#if 1 //recover ALS cycle to epl->als_cycle
     epl_sensor.als.cycle = epld->als_cycle;
     als_time = als_sensing_time(epl_sensor.als.integration_time, epl_sensor.als.adc, epl_sensor.als.cycle);
     ps_time = ps_sensing_time(epl_sensor.ps.integration_time, epl_sensor.ps.adc, epl_sensor.ps.cycle);
@@ -1865,7 +1913,7 @@ static void epl_sensor_intr_als_report_lux(void)
 				 epl_sensor.als.low_threshold, epl_sensor.als.high_threshold);
 	    }
 
-            
+            //epl_sensor.als.low_threshold = epl_sensor.als.low_threshold - als_thd_add;
 	    if(epl_sensor.als.high_threshold <= (0xffff - als_thd_add))
 		epl_sensor.als.high_threshold = epl_sensor.als.high_threshold + als_thd_add;
 
@@ -1900,7 +1948,7 @@ static void epl_sensor_intr_als_report_lux(void)
 
 	epl_sensor_I2C_Write(epld->client, 0x00, epl_sensor.wait | epl_sensor.mode);
 #else
-	
+	//set dynamic threshold
 	if(epl_sensor.als.compare_high >> 4)
 	{
 		epl_sensor.als.high_threshold = epl_sensor.als.high_threshold + 250;
@@ -1931,10 +1979,11 @@ static void epl_sensor_intr_als_report_lux(void)
 	    epl_sensor.als.low_threshold = ALS_LOW_THRESHOLD;
 	}
 
-	
+	//write new threshold
 	set_lsensor_intr_threshold(epl_sensor.als.low_threshold, epl_sensor.als.high_threshold);
 #endif
 }
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_eint_work(struct work_struct *work)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -1954,7 +2003,7 @@ static void epl_sensor_eint_work(struct work_struct *work)
 		wake_lock_timeout(&(epld->ps_wake_lock), 2*HZ);
 		epl_sensor_report_ps_status();
 
-		
+		// PS unlock and run
 		epl_sensor.ps.compare_reset = EPL_CMP_RUN;
 		epl_sensor.ps.lock = EPL_UN_LOCK;
 		epl_sensor_I2C_Write(epld->client,0x1b, epl_sensor.ps.compare_reset | epl_sensor.ps.lock);
@@ -1966,13 +2015,13 @@ static void epl_sensor_eint_work(struct work_struct *work)
 	if(epl_sensor.als.interrupt_flag == EPL_INT_TRIGGER) {
 		epl_sensor_intr_als_report_lux();
 
-		
+		//ALS unlock and run
 		epl_sensor.als.compare_reset = EPL_CMP_RUN;
 		epl_sensor.als.lock = EPL_UN_LOCK;
 		epl_sensor_I2C_Write(epld->client,0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
 	}
 
-	
+	/* Debug log for unknown interrupt */
 	if(!(eint_debug_flag & EPL_INT_TRIGGER)) {
 
 		LOG_INFO("[%s]: unknown interrupt-->mode= %d \r\n", __func__, epl_sensor.mode);
@@ -1992,6 +2041,8 @@ static void epl_sensor_eint_work(struct work_struct *work)
 		LOG_INFO("chip id REG 0x24 value = 0x%x\n", i2c_smbus_read_byte_data(epld->client, 0x24));
 		LOG_INFO("chip id REG 0x25 value = 0x%x\n", i2c_smbus_read_byte_data(epld->client, 0x25));
 
+		/* When unknown interrupt happens, clear the H/W interrupt flag
+		 * and restart the H/W comparator */
 		LOG_INFO("[%s]: unknown interrupt-->reset process++", __func__);
 		epl_sensor_I2C_Write(epld->client,0x1b, EPL_CMP_RESET | EPL_UN_LOCK);
 		epl_sensor_I2C_Write(epld->client,0x1b, EPL_CMP_RUN | EPL_UN_LOCK);
@@ -2004,6 +2055,7 @@ static void epl_sensor_eint_work(struct work_struct *work)
 	mutex_unlock(&sensor_mutex);
 	eint_flag = true;
 }
+/*----------------------------------------------------------------------------*/
 
 static int epl_sensor_setup_interrupt(struct epl_sensor_priv *epld)
 {
@@ -2056,7 +2108,9 @@ fail_free_intr_pin:
 	free_irq(epld->irq, epld);
 	return err;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 
 static ssize_t epl_sensor_show_reg(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -2102,6 +2156,7 @@ static ssize_t epl_sensor_show_reg(struct device *dev, struct device_attribute *
 
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_show_status(struct device *dev, struct device_attribute *attr, char *buf)
 {
     ssize_t len = 0;
@@ -2169,6 +2224,7 @@ static ssize_t epl_sensor_show_status(struct device *dev, struct device_attribut
     return len;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_als_enable(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     uint16_t mode=0;
@@ -2204,6 +2260,7 @@ static ssize_t epl_sensor_store_als_enable(struct device *dev, struct device_att
     return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_ps_enable(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     uint16_t mode=0;
@@ -2239,6 +2296,7 @@ static ssize_t epl_sensor_store_ps_enable(struct device *dev, struct device_attr
     return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_show_cal_raw(struct device *dev, struct device_attribute *attr, char *buf)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -2294,6 +2352,7 @@ static ssize_t epl_sensor_show_cal_raw(struct device *dev, struct device_attribu
 }
 
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_threshold(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -2324,6 +2383,7 @@ static ssize_t epl_sensor_store_threshold(struct device *dev, struct device_attr
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_wait_time(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     int val;
@@ -2333,6 +2393,7 @@ static ssize_t epl_sensor_store_wait_time(struct device *dev, struct device_attr
 
     return count;
 }
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_gain(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -2345,12 +2406,12 @@ static ssize_t epl_sensor_store_gain(struct device *dev, struct device_attribute
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
             epl_sensor.ps.gain = value;
 	        epl_sensor_I2C_Write(epld->client, 0x03, epl_sensor.ps.integration_time | epl_sensor.ps.gain);
 		break;
 
-        case EPL_MODE_ALS: 
+        case EPL_MODE_ALS: //als
             epl_sensor.als.gain = value;
 	        epl_sensor_I2C_Write(epld->client, 0x01, epl_sensor.als.integration_time | epl_sensor.als.gain);
 		break;
@@ -2361,6 +2422,7 @@ static ssize_t epl_sensor_store_gain(struct device *dev, struct device_attribute
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_mode(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -2401,6 +2463,7 @@ static ssize_t epl_sensor_store_mode(struct device *dev, struct device_attribute
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_ir_mode(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2413,7 +2476,7 @@ static ssize_t epl_sensor_store_ir_mode(struct device *dev, struct device_attrib
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 		switch(value)
 			{
 				case 0:
@@ -2434,6 +2497,7 @@ static ssize_t epl_sensor_store_ir_mode(struct device *dev, struct device_attrib
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_ir_contrl(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2447,7 +2511,7 @@ static ssize_t epl_sensor_store_ir_contrl(struct device *dev, struct device_attr
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 			switch(value)
 			{
 				case 0:
@@ -2471,6 +2535,7 @@ static ssize_t epl_sensor_store_ir_contrl(struct device *dev, struct device_attr
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_ir_drive(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2493,6 +2558,7 @@ static ssize_t epl_sensor_store_ir_drive(struct device *dev, struct device_attri
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_interrupt_type(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2505,7 +2571,7 @@ static ssize_t epl_sensor_store_interrupt_type(struct device *dev, struct device
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 			if(!epl_sensor.ps.polling_mode)
 			{
 		    	epl_sensor.ps.interrupt_type = value & 0x03;
@@ -2514,7 +2580,7 @@ static ssize_t epl_sensor_store_interrupt_type(struct device *dev, struct device
 			}
 		break;
 
-		case EPL_MODE_ALS: 
+		case EPL_MODE_ALS: //als
 			if(!epl_sensor.als.polling_mode)
 			{
 		    	epl_sensor.als.interrupt_type = value & 0x03;
@@ -2527,6 +2593,7 @@ static ssize_t epl_sensor_store_interrupt_type(struct device *dev, struct device
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 
 static ssize_t epl_sensor_store_ps_polling_mode(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2557,6 +2624,7 @@ static ssize_t epl_sensor_store_als_polling_mode(struct device *dev, struct devi
     return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_integration(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2569,14 +2637,14 @@ static ssize_t epl_sensor_store_integration(struct device *dev, struct device_at
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 			epl_sensor.ps.integration_time = (value & 0xf) << 2;
 			epl_sensor_I2C_Write(epld->client,0x03, epl_sensor.ps.integration_time | epl_sensor.ps.gain);
 			epl_sensor_I2C_Read(epld->client, 0x03, 1);
 			LOG_INFO("[%s]: 0x03 = 0x%x (0x%x)\n", __FUNCTION__, epl_sensor.ps.integration_time | epl_sensor.ps.gain, gRawData.raw_bytes[0]);
 		break;
 
-		case EPL_MODE_ALS: 
+		case EPL_MODE_ALS: //als
 			epl_sensor.als.integration_time = (value & 0xf) << 2;
 			epl_sensor_I2C_Write(epld->client,0x01, epl_sensor.als.integration_time | epl_sensor.als.gain);
 			epl_sensor_I2C_Read(epld->client, 0x01, 1);
@@ -2588,6 +2656,7 @@ static ssize_t epl_sensor_store_integration(struct device *dev, struct device_at
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_adc(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2600,14 +2669,14 @@ static ssize_t epl_sensor_store_adc(struct device *dev, struct device_attribute 
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 			epl_sensor.ps.adc = (value & 0x3) << 3;
 			epl_sensor_I2C_Write(epld->client,0x04, epl_sensor.ps.adc | epl_sensor.ps.cycle);
 			epl_sensor_I2C_Read(epld->client, 0x04, 1);
 			LOG_INFO("[%s]:0x04 = 0x%x (0x%x)\n", __FUNCTION__, epl_sensor.ps.adc | epl_sensor.ps.cycle, gRawData.raw_bytes[0]);
 		break;
 
-		case EPL_MODE_ALS: 
+		case EPL_MODE_ALS: //als
 			epl_sensor.als.adc = (value & 0x3) << 3;
 			epl_sensor_I2C_Write(epld->client,0x02, epl_sensor.als.adc | epl_sensor.als.cycle);
 			epl_sensor_I2C_Read(epld->client, 0x02, 1);
@@ -2619,6 +2688,7 @@ static ssize_t epl_sensor_store_adc(struct device *dev, struct device_attribute 
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_cycle(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2631,13 +2701,13 @@ static ssize_t epl_sensor_store_cycle(struct device *dev, struct device_attribut
 
 	switch (epl_sensor.mode)
 	{
-		case EPL_MODE_PS: 
+		case EPL_MODE_PS: //ps
 			epl_sensor.ps.cycle = (value & 0x7);
 			epl_sensor_I2C_Write(epld->client,0x04, epl_sensor.ps.adc | epl_sensor.ps.cycle);
 			LOG_INFO("[%s]:0x04 = 0x%x (0x%x)\n", __FUNCTION__, epl_sensor.ps.adc | epl_sensor.ps.cycle, gRawData.raw_bytes[0]);
 		break;
 
-		case EPL_MODE_ALS: 
+		case EPL_MODE_ALS: //als
 			epl_sensor.als.cycle = (value & 0x7);
 			epl_sensor_I2C_Write(epld->client,0x02, epl_sensor.als.adc | epl_sensor.als.cycle);
 			LOG_INFO("[%s]:0x02 = 0x%x (0x%x)\n", __FUNCTION__, epl_sensor.als.adc | epl_sensor.als.cycle, gRawData.raw_bytes[0]);
@@ -2648,6 +2718,7 @@ static ssize_t epl_sensor_store_cycle(struct device *dev, struct device_attribut
 	return count;
 }
 
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_als_report_type(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
@@ -2659,6 +2730,7 @@ static ssize_t epl_sensor_store_als_report_type(struct device *dev, struct devic
 
 	return count;
 }
+/*----------------------------------------------------------------------------*/
 static ssize_t epl_sensor_store_ps_w_calfile(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -2679,6 +2751,7 @@ static ssize_t epl_sensor_store_ps_w_calfile(struct device *dev, struct device_a
     write_factory_calibration(epld, ps_calibration, ps_cal_len);
 	return count;
 }
+/*----------------------------------------------------------------------------*/
 
 static ssize_t epl_sensor_store_reg_write(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2706,39 +2779,39 @@ static ssize_t epl_sensor_store_unlock(struct device *dev, struct device_attribu
     LOG_INFO("mode = %d \r\n", mode);
 	switch (mode)
 	{
-		case 0: 
-			
+		case 0: //ps
+			//PS unlock and run
         	epl_sensor.ps.compare_reset = EPL_CMP_RUN;
         	epl_sensor.ps.lock = EPL_UN_LOCK;
         	epl_sensor_I2C_Write(epld->client,0x1b, epl_sensor.ps.compare_reset |epl_sensor.ps.lock);
 		break;
 
-		case 1: 
-			
+		case 1: //als
+			//ALS unlock and run
         	epl_sensor.als.compare_reset = EPL_CMP_RUN;
         	epl_sensor.als.lock = EPL_UN_LOCK;
         	epl_sensor_I2C_Write(epld->client,0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
 		break;
 
-        case 2: 
+        case 2: //als unlock and reset
     		epl_sensor.als.compare_reset = EPL_CMP_RESET;
         	epl_sensor.als.lock = EPL_UN_LOCK;
         	epl_sensor_I2C_Write(epld->client,0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
         break;
 
-		case 3: 
-		    
+		case 3: //ps+als
+		    //PS unlock and run
         	epl_sensor.ps.compare_reset = EPL_CMP_RUN;
         	epl_sensor.ps.lock = EPL_UN_LOCK;
         	epl_sensor_I2C_Write(epld->client,0x1b, epl_sensor.ps.compare_reset |epl_sensor.ps.lock);
 
-			
+			//ALS unlock and run
         	epl_sensor.als.compare_reset = EPL_CMP_RUN;
         	epl_sensor.als.lock = EPL_UN_LOCK;
         	epl_sensor_I2C_Write(epld->client,0x12, epl_sensor.als.compare_reset | epl_sensor.als.lock);
 		break;
 	}
-    
+    /*double check PS or ALS lock*/
 
 
 	return count;
@@ -2755,11 +2828,11 @@ static ssize_t epl_sensor_store_als_ch_sel(struct device *dev, struct device_att
     LOG_INFO("channel selection = %d \r\n", ch_sel);
 	switch (ch_sel)
 	{
-		case 0: 
+		case 0: //ch0
 		    epl_sensor.als.interrupt_channel_select = EPL_ALS_INT_CHSEL_0;
 		break;
 
-		case 1: 
+		case 1: //ch1
         	epl_sensor.als.interrupt_channel_select = EPL_ALS_INT_CHSEL_1;
 		break;
 	}
@@ -2853,9 +2926,9 @@ static ssize_t epl_sensor_show_als_data(struct device *dev, struct device_attrib
             orig_ch1 = epl_sensor.als.data.channels[1];
             mutex_lock(&sensor_mutex);
     	    epl_sensor_read_als(epld->client);
-    	    
-    	    if(orig_ch1 != epl_sensor.als.data.channels[1]) 
-    	        epl_sensor.als.dyn_intt_raw =  epl_sensor.als.data.channels[1]/(als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); 
+    	    //epl_sensor.als.dyn_intt_raw = epl_sensor.als.data.channels[1]/als_dynamic_intt_value[dynamic_intt_idx];
+    	    if(orig_ch1 != epl_sensor.als.data.channels[1]) //if ALS_PS mode, it will waiting ALS ch1
+    	        epl_sensor.als.dyn_intt_raw =  epl_sensor.als.data.channels[1]/(als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); // for HTC
     	    mutex_unlock(&sensor_mutex);
     	}
         LOG_INFO("[%s]: epl_sensor.als.dyn_intt_raw = %d \r\n", __func__, epl_sensor.als.dyn_intt_raw);
@@ -2905,7 +2978,7 @@ static ssize_t epl_sensor_store_c_gain(struct device *dev, struct device_attribu
 
 static ssize_t epl_sensor_store_als_dyn_intt(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-    
+    //struct epl_sensor_priv *epld = epl_sensor_obj;
     int intt_h, intt_l;
     int i = 0;
     LOG_FUN();
@@ -3301,7 +3374,7 @@ static ssize_t ps_hw_store(struct device *dev, struct device_attribute *attr, co
 				__func__, epl_sensor.ps.cancelation, mfg_thd);
 	} else {
 		epl_sensor.ps.cancelation = ps_canc_set;
-		
+		//lpi->mfg_thd = mfg_thd;
 		epl_sensor_I2C_Write(epld->client,0x22, (u8)(epl_sensor.ps.cancelation& 0xff));
         epl_sensor_I2C_Write(epld->client,0x23, (u8)((epl_sensor.ps.cancelation & 0xff00) >> 8));
 
@@ -3331,8 +3404,8 @@ static ssize_t ps_headset_bt_plugin_store(struct device *dev,
 		const char *buf, size_t count)
 {
 	int headset_bt_plugin = 0;
-	
-	
+	//struct cm36686_info *lpi = lp_info;
+	//char cmd[2] = {0};
 
 	sscanf(buf, "%d", &headset_bt_plugin);
 	LOG_INFO("[PS] %s: headset_bt_plugin = %d\n", __func__, headset_bt_plugin);
@@ -3525,7 +3598,7 @@ static ssize_t ls_adc_show(struct device *dev,
 	int ret;
 	bool enable_als = epld->enable_lflag==1 && epld->als_suspend==0;
 	int als_time=0, ps_time=0;
-	
+	//u16 orig_ch1 = 0;
 	LOG_FUN();
 	if(enable_als == 0) {
 		epld->enable_lflag=1;
@@ -3539,9 +3612,9 @@ static ssize_t ls_adc_show(struct device *dev,
 			orig_ch1 = epl_sensor.als.data.channels[1];
 			mutex_lock(&sensor_mutex);
 			epl_sensor_read_als(epld->client);
-			
-			if(orig_ch1 != epl_sensor.als.data.channels[1]) 
-			epl_sensor.als.dyn_intt_raw =  epl_sensor.als.data.channels[1]/(als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); 
+			//epl_sensor.als.dyn_intt_raw = epl_sensor.als.data.channels[1]/als_dynamic_intt_value[dynamic_intt_idx];
+			if(orig_ch1 != epl_sensor.als.data.channels[1]) //if ALS_PS mode, it will waiting ALS ch1
+			epl_sensor.als.dyn_intt_raw =  epl_sensor.als.data.channels[1]/(als_dynamic_intt_value[dynamic_intt_idx] / als_dynamic_intt_value[1]); // for HTC
 			mutex_unlock(&sensor_mutex);
     		}
 #else
@@ -3560,9 +3633,9 @@ static ssize_t ls_adc_show(struct device *dev,
 				msleep(als_time + ps_time);
 	        }
 #endif
-		
+		//LOG_INFO("[%s]: epl_sensor.als.dyn_intt_raw = %d \r\n", __func__, epl_sensor.als.dyn_intt_raw);
 		LOG_INFO("[LS] %s: ADC[0x%04X](%d) => level %d, INTT=%d \n", __func__, epld->current_adc, epld->current_adc, epld->current_level, als_dynamic_intt_value[dynamic_intt_idx]);
-		
+		//ret = sprintf(buf, "ADC[0x%04X](%d) => level %d, INTT=%d \n", epl_sensor.als.dyn_intt_raw, epl_sensor.als.dyn_intt_raw, epld->current_level, als_dynamic_intt_value[dynamic_intt_idx]);
 		ret = sprintf(buf, "ADC[0x%04X] => level %d\n", epld->current_adc, epld->current_level);
 	} else
 #endif
@@ -3673,8 +3746,8 @@ static ssize_t ls_kadc_show(struct device *dev, struct device_attribute *attr, c
 	struct epl_sensor_priv *epld = epl_sensor_obj;
 	int ret;
 
-	
-	
+	//ret = sprintf(buf, "kadc = 0x%x, gadc = 0x%x, kadc while this boot = 0x%x\n",
+	//		epld->als_kadc, epld->als_gadc, als_kadc);
     ret = sprintf(buf, "kadc = 0x%x, kadc_high_lux = 0x%x, gadc = 0x%x, kadc while this boot = 0x%x\n",
 			epld->als_kadc, epld->als_kadc_high_lux, epld->als_gadc, als_kadc);
 	return ret;
@@ -3693,7 +3766,7 @@ static ssize_t ls_kadc_store(struct device *dev, struct device_attribute *attr, 
 							__func__, kadc_temp);
 		return -EINVAL;
 	}
-	
+	//mutex_lock(&als_get_adc_mutex);
 	epld->als_kadc_high_lux = kadc_temp;
 	epld->als_gadc = golden_adc;
     if(als_dynamic_intt_gain[0] == EPL_GAIN_MID){
@@ -3717,7 +3790,7 @@ static ssize_t ls_update_table_show(struct device *dev, struct device_attribute 
     struct epl_sensor_priv *epld = epl_sensor_obj;
     int ret = 0;
 
-    lightsensor_update_table(epld); 
+    lightsensor_update_table(epld); //for update table
 
     return ret;
 }
@@ -3847,20 +3920,31 @@ static ssize_t phone_status_show(struct device *dev, struct device_attribute *at
 static ssize_t phone_status_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int phone_status1 = 0;
-	
+	//struct epl_sensor_priv *epld = epl_sensor_obj;
 
 	sscanf(buf, "%d" , &phone_status1);
 
 	phone_status = phone_status1;
+	/*
+    phone_status:
+    call end = 0
+    call out = 1
+    call connect = 2
+    call in = 3
+	 */
 	LOG_INFO("[PS][epl88051] %s: phone_status = %d\n", __func__, phone_status);
+	/*	if (phone_status == 0)
+		oncall = 0;
+		else
+		oncall = 4;*/
 
 
 	if ((phone_status == 1 || phone_status == 3) && (call_count < 2))
 		call_count++;
 
-	if (phone_status == 1 || phone_status == 2) {  
+	if (phone_status == 1 || phone_status == 2) {  // reset polling index
         dynk_min_ps_raw_data = PS_max;
-		
+		//lpi->ps_base_index = (lpi->mapping_size - 1);
 	}
 
 	return count;
@@ -3892,6 +3976,7 @@ static ssize_t ls_dark_level_store(struct device *dev, struct device_attribute *
 }
 
 #endif
+/*----------------------------------------------------------------------------*/
 
 static DEVICE_ATTR(elan_status,	S_IROTH | S_IWOTH, epl_sensor_show_status, NULL);
 static DEVICE_ATTR(elan_reg, S_IROTH | S_IWOTH, epl_sensor_show_reg, NULL);
@@ -3958,6 +4043,7 @@ static DEVICE_ATTR(ls_dark_level, 0664, ls_dark_level_show, ls_dark_level_store)
 static DEVICE_ATTR(ls_update_table, 0664, ls_update_table_show, NULL);
 static DEVICE_ATTR(ls_flush, 0664, ls_flush_show, ls_flush_store);
 #endif
+/*----------------------------------------------------------------------------*/
 static struct attribute *epl_sensor_attr_list[] =
 {
     &dev_attr_elan_status.attr,
@@ -4001,12 +4087,16 @@ static struct attribute *epl_sensor_attr_list[] =
     &dev_attr_als_thd_add.attr,
     NULL,
 };
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static struct attribute_group epl_sensor_attr_group =
 {
     .attrs = epl_sensor_attr_list,
 };
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_als_open(struct inode *inode, struct file *file)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4022,7 +4112,9 @@ static int epl_sensor_als_open(struct inode *inode, struct file *file)
 
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_als_read(struct file *file, char __user *buffer, size_t count, loff_t *ppos)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4040,7 +4132,9 @@ static int epl_sensor_als_read(struct file *file, char __user *buffer, size_t co
         return 0;
     }
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_als_release(struct inode *inode, struct file *file)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4051,7 +4145,9 @@ static int epl_sensor_als_release(struct inode *inode, struct file *file)
 
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static long epl_sensor_als_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     int flag;
@@ -4149,7 +4245,9 @@ static long epl_sensor_als_ioctl(struct file *file, unsigned int cmd, unsigned l
 
 
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static struct file_operations epl_sensor_als_fops =
 {
     .owner = THIS_MODULE,
@@ -4158,7 +4256,9 @@ static struct file_operations epl_sensor_als_fops =
     .release = epl_sensor_als_release,
     .unlocked_ioctl = epl_sensor_als_ioctl
 };
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static struct miscdevice epl_sensor_als_device =
 {
     .minor = MISC_DYNAMIC_MINOR,
@@ -4169,7 +4269,9 @@ static struct miscdevice epl_sensor_als_device =
 #endif
     .fops = &epl_sensor_als_fops
 };
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_ps_open(struct inode *inode, struct file *file)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4183,7 +4285,9 @@ static int epl_sensor_ps_open(struct inode *inode, struct file *file)
 
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_ps_release(struct inode *inode, struct file *file)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4194,7 +4298,9 @@ static int epl_sensor_ps_release(struct inode *inode, struct file *file)
 
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static long epl_sensor_ps_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     int value;
@@ -4206,7 +4312,7 @@ static long epl_sensor_ps_ioctl(struct file *file, unsigned int cmd, unsigned lo
 
     LOG_INFO("ps io ctrl cmd %d\n", _IOC_NR(cmd));
 
-    
+    //ioctl message handle must define by android sensor library (case by case)
     switch(cmd)
     {
 #if S5PV210
@@ -4237,11 +4343,11 @@ static long epl_sensor_ps_ioctl(struct file *file, unsigned int cmd, unsigned lo
 			if(flag) {
 				epld->j_start = jiffies;
 
-				
+				/* dummy report */
 				input_report_abs(epld->ps_input_dev, ABS_DISTANCE, -1);
 				input_sync(epld->ps_input_dev);
 
-				
+				/* Intial cancellation and threshold */
 				epl_sensor_I2C_Write(epld->client, 0x22, (u8)(ps_canc_set & 0xff));
 				epl_sensor_I2C_Write(epld->client, 0x23, (u8)((ps_canc_set & 0xff00) >> 8));
 				set_psensor_intr_threshold(dynk_thd_low, dynk_thd_high);
@@ -4311,7 +4417,9 @@ static long epl_sensor_ps_ioctl(struct file *file, unsigned int cmd, unsigned lo
     return 0;
 
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static struct file_operations epl_sensor_ps_fops =
 {
     .owner = THIS_MODULE,
@@ -4319,7 +4427,9 @@ static struct file_operations epl_sensor_ps_fops =
     .release = epl_sensor_ps_release,
     .unlocked_ioctl = epl_sensor_ps_ioctl
 };
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static struct miscdevice epl_sensor_ps_device =
 {
     .minor = MISC_DYNAMIC_MINOR,
@@ -4331,6 +4441,7 @@ static struct miscdevice epl_sensor_ps_device =
     .fops = &epl_sensor_ps_fops
 };
 
+/*----------------------------------------------------------------------------*/
 static ssize_t light_enable_show(struct device *dev,
 					 struct device_attribute *attr, char *buf)
 {
@@ -4368,6 +4479,7 @@ static ssize_t light_enable_store(struct device *dev,
 
 	return size;
 }
+/*----------------------------------------------------------------------------*/
 static struct device_attribute dev_attr_light_enable =
 __ATTR(enable, S_IRWXUGO,
 	   light_enable_show, light_enable_store);
@@ -4380,6 +4492,7 @@ static struct attribute *light_sysfs_attrs[] = {
 static struct attribute_group light_attribute_group = {
 	.attrs = light_sysfs_attrs,
 };
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_setup_lsensor(struct epl_sensor_priv *epld) {
 	int err = 0;
 	LOG_INFO("epl_sensor_setup_lsensor enter.\n");
@@ -4421,13 +4534,16 @@ err_free_ls_input_device:
 	input_free_device(epld->als_input_dev);
 	return err;
 }
+/*----------------------------------------------------------------------------*/
 static ssize_t proximity_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct epl_sensor_priv *epld  = epl_sensor_obj;
 	LOG_INFO("%s: PS status=%d\n", __func__, epld->enable_pflag);
 	return sprintf(buf, "%d\n", epld->enable_pflag);
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static ssize_t proximity_enable_store(struct device *dev, struct device_attribute *attr,
 					 const char *buf, size_t size)
 {
@@ -4459,6 +4575,7 @@ static ssize_t proximity_enable_store(struct device *dev, struct device_attribut
 	}
 	return size;
 }
+/*----------------------------------------------------------------------------*/
 static struct device_attribute dev_attr_psensor_enable =
 __ATTR(enable, S_IRWXUGO,
 	   proximity_enable_show, proximity_enable_store);
@@ -4471,6 +4588,7 @@ static struct attribute *proximity_sysfs_attrs[] = {
 static struct attribute_group proximity_attribute_group = {
 	.attrs = proximity_sysfs_attrs,
 };
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_setup_psensor(struct epl_sensor_priv *epld)
 {
 	int err = 0;
@@ -4514,6 +4632,7 @@ err_free_ps_input_device:
 	input_free_device(epld->ps_input_dev);
 	return err;
 }
+/*----------------------------------------------------------------------------*/
 static int epl88051_pinctrl_init(struct epl_sensor_priv *epld)
 {
         int retval;
@@ -4521,7 +4640,7 @@ static int epl88051_pinctrl_init(struct epl_sensor_priv *epld)
         int ret;
 
         LOG_INFO("epl88051_pinctrl_init");
-        
+        /* Get pinctrl if target uses pinctrl */
         epld->pinctrl = devm_pinctrl_get(&client->dev);
         if (IS_ERR_OR_NULL(epld->pinctrl)) {
                 pr_err("[PS][epl88051 error]%s: Target does not use pinctrl\n", __func__);
@@ -4546,6 +4665,7 @@ static int epl88051_pinctrl_init(struct epl_sensor_priv *epld)
 
         return 0;
 }
+/*----------------------------------------------------------------------------*/
 #ifdef CONFIG_SUSPEND
 static int epl_sensor_suspend(struct i2c_client *client, pm_message_t mesg)
 {
@@ -4560,7 +4680,7 @@ static int epl_sensor_suspend(struct i2c_client *client, pm_message_t mesg)
         if(epld->enable_lflag == 1)
         {
             LOG_INFO("[%s]: als enabled! \r\n", __func__);
-            
+            //epl_sensor_restart_polling();
         }
     }
     else{
@@ -4593,7 +4713,7 @@ static void epl_sensor_early_suspend(struct early_suspend *h)
         if(epld->enable_lflag == 1)
         {
             LOG_INFO("[%s]: als enabled! \r\n", __func__);
-            
+            //epl_sensor_restart_polling();
         }
     }
     else{
@@ -4658,8 +4778,10 @@ static int epl_sensor_resume(struct i2c_client *client)
 
 	return 0;
 }
+/*----------------------------------------------------------------------------*/
 
 #if defined(CONFIG_HAS_EARLYSUSPEND)
+/*----------------------------------------------------------------------------*/
 static void epl_sensor_late_resume(struct early_suspend *h)
 {
     struct epl_sensor_priv *epld = epl_sensor_obj;
@@ -4684,6 +4806,7 @@ static void epl_sensor_late_resume(struct early_suspend *h)
 #endif
 
 #endif
+/*----------------------------------------------------------------------------*/
 
 #if HTC_ATTR
 static void lightsensor_set_kvalue(struct epl_sensor_priv *epld)
@@ -4745,7 +4868,7 @@ static void psensor_set_kvalue(struct epl_sensor_priv *epld)
         LOG_INFO("[PS] %s: PS calibrated emmc_ps_kadc1 = 0x%04X, emmc_ps_kadc2 = 0x%04X\n",
                                __func__, epld->emmc_ps_kadc1, epld->emmc_ps_kadc2);
 
-        
+        /* Only use ps_kparam2 for CM36282/CM36686 */
         if (epld->emmc_ps_kadc1 >> 16 == PS_CALIBRATED) {
                 psensor_cali = 1;
                 epld->inte_ps_canc = (uint16_t) (epld->emmc_ps_kadc2 & 0xFFFF);
@@ -4773,7 +4896,7 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
 	uint32_t temp = 0;
 
 	LOG_INFO("[PS][epl88051] %s: +\n", __func__);
-#if 1 
+#if 1 //help test
 	prop = of_find_property(dt, "epl88051,levels", NULL);
 	if (prop) {
 		of_property_read_u32_array(dt, "epl88051,levels", adctable, 10);
@@ -4845,7 +4968,7 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
 	if (prop) {
 		of_property_read_u32(dt, "epl88051,ps_hd", &temp);
 	}
-	epld->ps_hd = (u8)temp; 
+	epld->ps_hd = (u8)temp; //dont use, output 12bit or 16bit
 
 	prop = of_find_property(dt, "epl88051,ps_led_current", NULL);
 	if (prop) {
@@ -4875,7 +4998,7 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
     epld->als_kadc_high_lux = k_adc_high_lux;
 #endif
 	epld->emmc_als_kadc = 0;
-#if 1 
+#if 1 //help test
 	if ((offset = of_find_node_by_path(CALIBRATION_DATA_PATH))) {
 		cali_data = (unsigned char*) of_get_property(offset, LIGHT_SENSOR_FLASH_DATA, &cali_size);
 
@@ -4892,7 +5015,7 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
 #endif
 	epld->emmc_ps_kadc1 = 0;
 	epld->emmc_ps_kadc2 = 0;
-#if 1   
+#if 1   //help test
 	if ((offset = of_find_node_by_path(CALIBRATION_DATA_PATH))) {
 		cali_data = (unsigned char*) of_get_property(offset, PSENSOR_FLASH_DATA, &cali_size);
 
@@ -4911,9 +5034,9 @@ static int epl_sensor_parse_dt(struct device *dev, struct epl_sensor_priv *epld)
 		LOG_INFO("%s: Psensor calibration data offset not found", __func__);
 
 #endif
-	
-	
-	
+	//epld->intr_pin = of_get_named_gpio_flags(dt, "epl88051,irq-gpio",
+	//		0, &epld->irq_gpio_flags);
+	//pdata->lpm_power = cm3629_sr_lpm;
 
 	return 0;
 
@@ -4958,6 +5081,7 @@ static int lightsensor_update_table(struct epl_sensor_priv *epld)
 	return 0;
 }
 #endif
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_probe(struct i2c_client *client,const struct i2c_device_id *id)
 {
 	int err = 0;
@@ -5039,7 +5163,7 @@ static int epl_sensor_probe(struct i2c_client *client,const struct i2c_device_id
 	ps_canc_set    = epld->inte_ps_canc;
 	mfg_thd        = epld->mfg_thd;
 
-	
+	//initial global variable and write to senosr
 	initial_global_variable(client, epld);
 
 	err = epl_sensor_setup_lsensor(epld);
@@ -5154,6 +5278,7 @@ static int epl_sensor_probe(struct i2c_client *client,const struct i2c_device_id
 	if (err)
 		goto err_create_ls_device_file;
 
+/****************************************************************************************/
 	epld->ps_dev = device_create(epld->epl_sensor_class,
 					NULL, 0, "%s", "proximity");
 
@@ -5237,6 +5362,7 @@ i2c_fail:
 	return err;
 }
 
+/*----------------------------------------------------------------------------*/
 static int epl_sensor_remove(struct i2c_client *client)
 {
     struct epl_sensor_priv *epld = i2c_get_clientdata(client);
@@ -5257,13 +5383,16 @@ static int epl_sensor_remove(struct i2c_client *client)
     kfree(epld);
     return 0;
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 static const struct i2c_device_id epl_sensor_id[] =
 {
     { EPL_DEV_NAME, 0 },
     { }
 };
 
+/*----------------------------------------------------------------------------*/
 
 #if QCOM
 static struct of_device_id epl_match_table[] = {
@@ -5272,6 +5401,7 @@ static struct of_device_id epl_match_table[] = {
 };
 #endif
 
+/*----------------------------------------------------------------------------*/
 static struct i2c_driver epl_sensor_driver =
 {
     .probe	= epl_sensor_probe,
@@ -5299,10 +5429,14 @@ static void __exit  epl_sensor_exit(void)
 {
     i2c_del_driver(&epl_sensor_driver);
 }
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 module_init(epl_sensor_init);
 module_exit(epl_sensor_exit);
+/*----------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------*/
 MODULE_AUTHOR("Renato Pan <renato.pan@eminent-tek.com>");
 MODULE_DESCRIPTION("ELAN epl88051_KPW driver");
 MODULE_LICENSE("GPL");

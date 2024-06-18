@@ -149,6 +149,7 @@ static struct devfreq_node *find_devfreq_node(struct device *dev)
 	return NULL;
 }
 
+/* ==================== cpufreq part ==================== */
 static void add_policy(struct cpufreq_policy *policy)
 {
 	struct cpu_state *new_state;
@@ -304,6 +305,7 @@ out:
 	return ret;
 }
 
+/* ==================== devfreq part ==================== */
 
 static unsigned int interpolate_freq(struct devfreq *df, unsigned int cpu)
 {

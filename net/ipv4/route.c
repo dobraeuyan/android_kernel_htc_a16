@@ -126,6 +126,9 @@ static int ip_rt_mtu_expires __read_mostly	= 10 * 60 * HZ;
 static int ip_rt_min_pmtu __read_mostly		= 512 + 20 + 20;
 static int ip_rt_min_advmss __read_mostly	= 256;
 
+/*
+ *	Interface to generic destination cache.
+ */
 
 static struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie);
 static unsigned int	 ipv4_default_advmss(const struct dst_entry *dst);
@@ -428,7 +431,7 @@ static inline int ip_rt_proc_init(void)
 {
 	return 0;
 }
-#endif 
+#endif /* CONFIG_PROC_FS */
 
 static inline bool rt_is_expired(const struct rtable *rth)
 {
@@ -461,6 +464,13 @@ static struct neighbour *ipv4_neigh_lookup(const struct dst_entry *dst,
 	return neigh_create(&arp_tbl, pkey, dev);
 }
 
+/*
+ * Peer allocation may fail only in serious out-of-memory conditions.  However
+ * we still can generate some output.
+ * Random ID selection looks a bit dangerous because we have no chances to
+ * select ID being unique in a reasonable period of time.
+ * But broken packet identifier may be better than no packet at all.
+ */
 static void ip_select_fb_ident(struct iphdr *iph)
 {
 	static DEFINE_SPINLOCK(ip_fb_id_lock);
@@ -758,6 +768,21 @@ static struct dst_entry *ipv4_negative_advice(struct dst_entry *dst)
 	return ret;
 }
 
+/*
+ * Algorithm:
+ *	1. The first ip_rt_redirect_number redirects are sent
+ *	   with exponential backoff, then we stop sending them at all,
+ *	   assuming that the host ignores our redirects.
+ *	2. If we did not see packets requiring redirects
+ *	   during ip_rt_redirect_silence, we assume that the host
+ *	   forgot redirected route and start to send redirects again.
+ *
+ * This algorithm is much cheaper and more intelligent than dumb load limiting
+ * in icmp.c.
+ *
+ * NOTE. Do not forget to inhibit load limiting for redirects (redundant)
+ * and "frag. need" (breaks PMTU discovery) in icmp.c.
+ */
 
 void ip_rt_send_redirect(struct sk_buff *skb)
 {
@@ -784,14 +809,23 @@ void ip_rt_send_redirect(struct sk_buff *skb)
 		return;
 	}
 
+	/* No redirected packets during ip_rt_redirect_silence;
+	 * reset the algorithm.
+	 */
 	if (time_after(jiffies, peer->rate_last + ip_rt_redirect_silence))
 		peer->rate_tokens = 0;
 
+	/* Too many ignored redirects; do not send anything
+	 * set dst.rate_last to the last seen redirected packet.
+	 */
 	if (peer->rate_tokens >= ip_rt_redirect_number) {
 		peer->rate_last = jiffies;
 		goto out_put_peer;
 	}
 
+	/* Check for load limit; set rate_last to the latest sent
+	 * redirect.
+	 */
 	if (peer->rate_tokens == 0 ||
 	    time_after(jiffies,
 		       (peer->rate_last +
@@ -1038,6 +1072,14 @@ static struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie)
 {
 	struct rtable *rt = (struct rtable *) dst;
 
+	/* All IPV4 dsts are created with ->obsolete set to the value
+	 * DST_OBSOLETE_FORCE_CHK which forces validation calls down
+	 * into this function always.
+	 *
+	 * When a PMTU/redirect information update invalidates a
+	 * route, this is indicated by setting obsolete to
+	 * DST_OBSOLETE_KILL.
+	 */
 	if (dst->obsolete == DST_OBSOLETE_KILL || rt_is_expired(rt))
 		return NULL;
 	return dst;
@@ -1064,6 +1106,14 @@ static int ip_rt_bug(struct sk_buff *skb)
 	return 0;
 }
 
+/*
+   We do not cache source address of outgoing interface,
+   because it is used only by IP RR, TS and SRR options,
+   so that it out of fast path.
+
+   BTW remember: "addr" is allowed to be not aligned
+   in IP options!
+ */
 
 void ip_rt_get_source(u8 *addr, struct sk_buff *skb, struct rtable *rt)
 {
@@ -1298,6 +1348,11 @@ static void rt_set_nexthop(struct rtable *rt, __be32 daddr,
 		else if (!(rt->dst.flags & DST_NOCACHE))
 			cached = rt_cache_route(nh, rt);
 		if (unlikely(!cached)) {
+			/* Routes we intend to cache in nexthop exception or
+			 * FIB nexthop have the DST_NOCACHE bit clear.
+			 * However, if we are unsuccessful at storing this
+			 * route into the cache we really need to set it.
+			 */
 			rt->dst.flags |= DST_NOCACHE;
 			if (!rt->rt_gateway)
 				rt->rt_gateway = daddr;
@@ -1323,6 +1378,7 @@ static struct rtable *rt_dst_alloc(struct net_device *dev,
 			 (noxfrm ? DST_NOXFRM : 0));
 }
 
+/* called in rcu_read_lock() section */
 static int ip_route_input_mc(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 				u8 tos, struct net_device *dev, int our)
 {
@@ -1331,7 +1387,7 @@ static int ip_route_input_mc(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	u32 itag = 0;
 	int err;
 
-	
+	/* Primary sanity checks. */
 
 	if (in_dev == NULL)
 		return -EINVAL;
@@ -1405,6 +1461,10 @@ static void ip_handle_martian_source(struct net_device *dev,
 	RT_CACHE_STAT_INC(in_martian_src);
 #ifdef CONFIG_IP_ROUTE_VERBOSE
 	if (IN_DEV_LOG_MARTIANS(in_dev) && net_ratelimit()) {
+		/*
+		 *	RFC1812 recommendation, if source is martian,
+		 *	the only hint is MAC header.
+		 */
 		pr_warn("martian source %pI4 from %pI4, on dev %s\n",
 			&daddr, &saddr, dev->name);
 		if (dev->hard_header_len && skb_mac_header_was_set(skb)) {
@@ -1417,6 +1477,7 @@ static void ip_handle_martian_source(struct net_device *dev,
 #endif
 }
 
+/* called in rcu_read_lock() section */
 static int __mkroute_input(struct sk_buff *skb,
 			   const struct fib_result *res,
 			   struct in_device *in_dev,
@@ -1429,7 +1490,7 @@ static int __mkroute_input(struct sk_buff *skb,
 	bool do_cache;
 	u32 itag = 0;
 
-	
+	/* get a working reference to the output device */
 	out_dev = __in_dev_get_rcu(FIB_RES_DEV(*res));
 	if (out_dev == NULL) {
 		net_crit_ratelimited("Bug in ip_route_input_slow(). Please report.\n");
@@ -1447,13 +1508,19 @@ static int __mkroute_input(struct sk_buff *skb,
 
 	do_cache = res->fi && !itag;
 	if (out_dev == in_dev && err && IN_DEV_TX_REDIRECTS(out_dev) &&
+	    skb->protocol == htons(ETH_P_IP) &&
 	    (IN_DEV_SHARED_MEDIA(out_dev) ||
-	     inet_addr_onlink(out_dev, saddr, FIB_RES_GW(*res)))) {
-		flags |= RTCF_DOREDIRECT;
-		do_cache = false;
-	}
+	     inet_addr_onlink(out_dev, saddr, FIB_RES_GW(*res))))
+		IPCB(skb)->flags |= IPSKB_DOREDIRECT;
 
 	if (skb->protocol != htons(ETH_P_IP)) {
+		/* Not IP (i.e. ARP). Do not create route, if it is
+		 * invalid for proxy arp. DNAT routes are always valid.
+		 *
+		 * Proxy arp feature have been extended to allow, ARP
+		 * replies back to the same interface, to support
+		 * Private VLAN switch technologies. See arp.c.
+		 */
 		if (out_dev == in_dev &&
 		    IN_DEV_PROXY_ARP_PVLAN(in_dev) == 0) {
 			err = -EINVAL;
@@ -1511,10 +1578,20 @@ static int ip_mkroute_input(struct sk_buff *skb,
 		fib_select_multipath(res);
 #endif
 
-	
+	/* create a routing cache entry */
 	return __mkroute_input(skb, res, in_dev, daddr, saddr, tos);
 }
 
+/*
+ *	NOTE. We drop all the packets that has local source
+ *	addresses, because every properly looped back packet
+ *	must have correct destination already attached by output routine.
+ *
+ *	Such approach solves two big problems:
+ *	1. Not simplex devices are handled properly.
+ *	2. IP spoofing attempts are filtered with 100% of guarantee.
+ *	called with rcu_read_lock()
+ */
 
 static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			       u8 tos, struct net_device *dev)
@@ -1529,11 +1606,14 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	struct net    *net = dev_net(dev);
 	bool do_cache;
 
-	
+	/* IP on this device is disabled. */
 
 	if (!in_dev)
 		goto out;
 
+	/* Check for the most weird martians, which can be not detected
+	   by fib_lookup.
+	 */
 
 	if (ipv4_is_multicast(saddr) || ipv4_is_lbcast(saddr))
 		goto martian_source;
@@ -1542,12 +1622,18 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	if (ipv4_is_lbcast(daddr) || (saddr == 0 && daddr == 0))
 		goto brd_input;
 
+	/* Accept zero addresses only to limited broadcast;
+	 * I even do not know to fix it or not. Waiting for complains :-)
+	 */
 	if (ipv4_is_zeronet(saddr))
 		goto martian_source;
 
 	if (ipv4_is_zeronet(daddr))
 		goto martian_destination;
 
+	/* Following code try to avoid calling IN_DEV_NET_ROUTE_LOCALNET(),
+	 * and call it once if daddr or/and saddr are loopback addresses
+	 */
 	if (ipv4_is_loopback(daddr)) {
 		if (!IN_DEV_NET_ROUTE_LOCALNET(in_dev, net))
 			goto martian_destination;
@@ -1556,6 +1642,9 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			goto martian_source;
 	}
 
+	/*
+	 *	Now we are ready to route packet.
+	 */
 	fl4.flowi4_oif = 0;
 	fl4.flowi4_iif = dev->ifindex;
 	fl4.flowi4_mark = skb->mark;
@@ -1659,6 +1748,9 @@ no_route:
 		err = -ENETUNREACH;
 	goto local_input;
 
+	/*
+	 *	Do not cache martian addresses: they should be logged (RFC1812)
+	 */
 martian_destination:
 	RT_CACHE_STAT_INC(in_martian_dst);
 #ifdef CONFIG_IP_ROUTE_VERBOSE
@@ -1689,6 +1781,17 @@ int ip_route_input_noref(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 
 	rcu_read_lock();
 
+	/* Multicast recognition logic is moved from route cache to here.
+	   The problem was that too many Ethernet cards have broken/missing
+	   hardware multicast filters :-( As result the host on multicasting
+	   network acquires a lot of useless route cache entries, sort of
+	   SDR messages from all the world. Now we try to get rid of them.
+	   Really, provided software IP multicast filter is organized
+	   reasonably (at least, hashed), it does not result in a slowdown
+	   comparing with route cache reject entries.
+	   Note, that multicast routers are not affected, because
+	   route cache entry is created eventually.
+	 */
 	if (ipv4_is_multicast(daddr)) {
 		struct in_device *in_dev = __in_dev_get_rcu(dev);
 
@@ -1717,6 +1820,7 @@ int ip_route_input_noref(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 }
 EXPORT_SYMBOL(ip_route_input_noref);
 
+/* called with rcu_read_lock() */
 static struct rtable *__mkroute_output(const struct fib_result *res,
 				       const struct flowi4 *fl4, int orig_oif,
 				       struct net_device *dev_out,
@@ -1758,6 +1862,10 @@ static struct rtable *__mkroute_output(const struct fib_result *res,
 			flags &= ~RTCF_LOCAL;
 		else
 			do_cache = false;
+		/* If multicast route do not exist use
+		 * default one, but do not gateway in this case.
+		 * Yes, it is hack.
+		 */
 		if (fi && res->prefixlen < 4)
 			fi = NULL;
 	}
@@ -1835,6 +1943,9 @@ add:
 	return rth;
 }
 
+/*
+ * Major route resolver routine.
+ */
 
 struct rtable *__ip_route_output_key(struct net *net, struct flowi4 *fl4)
 {
@@ -1864,22 +1975,43 @@ struct rtable *__ip_route_output_key(struct net *net, struct flowi4 *fl4)
 		    ipv4_is_zeronet(fl4->saddr))
 			goto out;
 
+		/* I removed check for oif == dev_out->oif here.
+		   It was wrong for two reasons:
+		   1. ip_dev_find(net, saddr) can return wrong iface, if saddr
+		      is assigned to multiple interfaces.
+		   2. Moreover, we are allowed to send packets with saddr
+		      of another iface. --ANK
+		 */
 
 		if (fl4->flowi4_oif == 0 &&
 		    (ipv4_is_multicast(fl4->daddr) ||
 		     ipv4_is_lbcast(fl4->daddr))) {
-			
+			/* It is equivalent to inet_addr_type(saddr) == RTN_LOCAL */
 			dev_out = __ip_dev_find(net, fl4->saddr, false);
 			if (dev_out == NULL)
 				goto out;
 
+			/* Special hack: user can direct multicasts
+			   and limited broadcast via necessary interface
+			   without fiddling with IP_MULTICAST_IF or IP_PKTINFO.
+			   This hack is not just for fun, it allows
+			   vic,vat and friends to work.
+			   They bind socket to loopback, set ttl to zero
+			   and expect that it will work.
+			   From the viewpoint of routing cache they are broken,
+			   because we are not allowed to build multicast path
+			   with loopback source addr (look, routing cache
+			   cannot know, that ttl is zero, so that packet
+			   will not leave this host and route is valid).
+			   Luckily, this hack is good workaround.
+			 */
 
 			fl4->flowi4_oif = dev_out->ifindex;
 			goto make_route;
 		}
 
 		if (!(fl4->flowi4_flags & FLOWI_FLAG_ANYSRC)) {
-			
+			/* It is equivalent to inet_addr_type(saddr) == RTN_LOCAL */
 			if (!__ip_dev_find(net, fl4->saddr, false))
 				goto out;
 		}
@@ -1892,7 +2024,7 @@ struct rtable *__ip_route_output_key(struct net *net, struct flowi4 *fl4)
 		if (dev_out == NULL)
 			goto out;
 
-		
+		/* RACE: Check return value of inet_select_addr instead. */
 		if (!(dev_out->flags & IFF_UP) || !__in_dev_get_rcu(dev_out)) {
 			rth = ERR_PTR(-ENETUNREACH);
 			goto out;
@@ -1929,6 +2061,23 @@ struct rtable *__ip_route_output_key(struct net *net, struct flowi4 *fl4)
 		res.fi = NULL;
 		res.table = NULL;
 		if (fl4->flowi4_oif) {
+			/* Apparently, routing tables are wrong. Assume,
+			   that the destination is on link.
+
+			   WHY? DW.
+			   Because we are allowed to send to iface
+			   even if it has NO routes and NO assigned
+			   addresses. When oif is specified, routing
+			   tables are looked up with only one purpose:
+			   to catch if destination is gatewayed, rather than
+			   direct. Moreover, if MSG_DONTROUTE is set,
+			   we send packet, ignoring both routing tables
+			   and ifaddr state. --ANK
+
+
+			   We could make it even if oif is unknown,
+			   likely IPv6, but we do not.
+			 */
 
 			if (fl4->saddr == 0)
 				fl4->saddr = inet_select_addr(dev_out, 0,
@@ -2103,6 +2252,8 @@ static int rt_fill_info(struct net *net,  __be32 dst, __be32 src,
 	r->rtm_flags	= (rt->rt_flags & ~0xFFFF) | RTM_F_CLONED;
 	if (rt->rt_flags & RTCF_NOTIFY)
 		r->rtm_flags |= RTM_F_NOTIFY;
+	if (IPCB(skb)->flags & IPSKB_DOREDIRECT)
+		r->rtm_flags |= RTCF_DOREDIRECT;
 
 	if (nla_put_be32(skb, RTA_DST, dst))
 		goto nla_put_failure;
@@ -2214,10 +2365,13 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr *nlh)
 		goto errout;
 	}
 
+	/* Reserve room for dummy headers, this skb can pass
+	   through good chunk of routing engine.
+	 */
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 
-	
+	/* Bugfix: need to give ip_route_input enough of an IP header to not gag. */
 	ip_hdr(skb)->protocol = IPPROTO_ICMP;
 	skb_reserve(skb, MAX_HEADER + sizeof(struct iphdr));
 
@@ -2326,7 +2480,7 @@ static ctl_table ipv4_route_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
-		
+		/*  Deprecated. Use gc_min_interval_ms */
 
 		.procname	= "gc_min_interval",
 		.data		= &ip_rt_gc_min_interval,
@@ -2441,7 +2595,7 @@ static __net_init int sysctl_route_net_init(struct net *net)
 		if (tbl == NULL)
 			goto err_dup;
 
-		
+		/* Don't export sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns)
 			tbl[0].procname = NULL;
 	}
@@ -2514,7 +2668,7 @@ static __net_initdata struct pernet_operations ipv4_inetpeer_ops = {
 
 #ifdef CONFIG_IP_ROUTE_CLASSID
 struct ip_rt_acct __percpu *ip_rt_acct __read_mostly;
-#endif 
+#endif /* CONFIG_IP_ROUTE_CLASSID */
 
 int __init ip_rt_init(void)
 {
@@ -2561,6 +2715,10 @@ int __init ip_rt_init(void)
 }
 
 #ifdef CONFIG_SYSCTL
+/*
+ * We really need to sanitize the damn ipv4 init order, then all
+ * this nonsense will go away.
+ */
 void __init ip_static_sysctl_init(void)
 {
 	register_net_sysctl(&init_net, "net/ipv4/route", ipv4_route_table);

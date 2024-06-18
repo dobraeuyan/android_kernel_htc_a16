@@ -88,6 +88,13 @@ static int ncp6924_enable(struct ncp6924_regulator *reg, bool enable)
 			reg->is_enable = true;
 			pr_info("%s : enable gpio %d.\n", __func__, reg->en_gpio);
 		} else {
+			/*
+			 * Ignore set NCP6924_EN pull down by HW request
+			 *
+			 * gpio_set_value(reg->en_gpio, 0);
+			 * reg->is_enable = false;
+			 * pr_info("%s : disable gpio %d.\n", __func__, reg->en_gpio);
+			 */
 		}
 	}
 	else {
@@ -126,19 +133,19 @@ static int ncp6924_i2c_write(struct device *dev, u8 reg_addr, u8 data)
 		},
 	};
 
-	
+	//mutex_lock(&ncp6924_mutex);
 	orig_state = ncp6924_is_enable(reg);
 	if (orig_state == false)
 		ncp6924_enable(reg, true);
 	res = i2c_transfer(client->adapter, msg, 1);
-	
-	
-	
+	/* Set back to original gpio state */
+	/* If original enable and doesn't request enable -> Back to enable */
+	/* If original enable and request disable -> Set to disable */
 	if ((orig_state == false && !(reg_addr == NCP6924_ENABLE && data != 0x00)) ||
 	    (reg_addr == NCP6924_ENABLE && data == 0x00)) {
 		ncp6924_enable(reg, false);
 	}
-	
+	//mutex_unlock(&ncp6924_mutex);
 	if (res > 0)
 		res = 0;
 
@@ -167,15 +174,15 @@ static int ncp6924_i2c_read(struct device *dev, u8 reg_addr, u8 *data)
 		},
 	};
 
-	
+	//mutex_lock(&ncp6924_mutex);
 	curr_state = ncp6924_is_enable(reg);
 	if (curr_state == 0)
 		ncp6924_enable(reg, true);
 	res = i2c_transfer(client->adapter, msg, 2);
-	
+	/* Set back to original gpio state */
 	if (curr_state == 0)
 		ncp6924_enable(reg, false);
-	
+	//mutex_unlock(&ncp6924_mutex);
 	if (res >= 0)
 		res = 0;
 
@@ -214,9 +221,9 @@ static int ncp6924_vreg_enable(struct regulator_dev *rdev)
 	rc = ncp6924_i2c_read(dev, vreg->enable_addr, &val);
 	val |= (1 << vreg->enable_bit);
 	ncp6924_dcdc2_list = &reg->ncp6924_vregs[1];
-#if defined (CONFIG_MACH_DUMMY)
+#if defined (CONFIG_MACH_A32E)
 	if(vreg->resource_id >= 2 && ncp6924_dcdc2_list->rdev->use_count == 2)
-#elif defined (CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
+#elif defined (CONFIG_MACH_A13) || defined(CONFIG_MACH_A12)
 	if(vreg->resource_id >= 2 && ncp6924_dcdc2_list->rdev->use_count == 0)
 #endif
 		val |= 0x4;
@@ -240,9 +247,9 @@ static int ncp6924_vreg_disable(struct regulator_dev *rdev)
 	rc = ncp6924_i2c_read(dev, vreg->enable_addr, &val);
 	val &= ~(1 << vreg->enable_bit);
 	ncp6924_dcdc2_list = &reg->ncp6924_vregs[1];
-#if defined (CONFIG_MACH_DUMMY)
+#if defined (CONFIG_MACH_A32E)
 	if(vreg->resource_id >= 2 && ncp6924_dcdc2_list->rdev->use_count == 2)
-#elif defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
+#elif defined(CONFIG_MACH_A13) || defined(CONFIG_MACH_A12)
 	if(vreg->resource_id >= 2 && ncp6924_dcdc2_list->rdev->use_count == 1)
 #endif
 		val &= ~0x4;
@@ -390,7 +397,7 @@ static int ncp6924_probe(struct i2c_client *client, const struct i2c_device_id *
 			goto fail_free_regulator;
 		}
 	}
-	
+	/* Calculate number of regulators */
 	for_each_child_of_node(node, child)
 		num_vregs++;
 	reg->total_vregs = num_vregs;
@@ -401,7 +408,7 @@ static int ncp6924_probe(struct i2c_client *client, const struct i2c_device_id *
 		return -ENOMEM;
 	}
 
-	
+	/* Get device tree properties */
 	for_each_child_of_node(node, child) {
 		ncp6924_vreg = &reg->ncp6924_vregs[vreg_idx++];
 		ret = of_property_read_string(child, "regulator-name",
@@ -519,8 +526,8 @@ static int ncp6924_probe(struct i2c_client *client, const struct i2c_device_id *
 		}
 	}
 
-#if defined(CONFIG_MACH_DUMMY) || defined(CONFIG_MACH_DUMMY)
-	
+#if defined(CONFIG_MACH_A13) || defined(CONFIG_MACH_A12)
+	/* Workaround: default voltage set to 3.1v for ncp_dcdc2 */
 	ncp6924_i2c_write(dev, 0x22, 0xC8);
 #endif
 	return ret;

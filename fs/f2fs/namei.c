@@ -57,7 +57,7 @@ static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 		goto fail;
 	}
 
-	
+	/* If the directory encrypted, then we should encrypt the inode. */
 	if (f2fs_encrypted_inode(dir) && f2fs_may_encrypt(inode))
 		f2fs_set_encrypted_inode(inode);
 
@@ -90,6 +90,10 @@ static int is_multimedia_file(const unsigned char *s, const char *sub)
 	size_t slen = strlen(s);
 	size_t sublen = strlen(sub);
 
+	/*
+	 * filename format of multimedia file should be defined as:
+	 * "filename + '.' + extension".
+	 */
 	if (slen < sublen + 2)
 		return 0;
 
@@ -99,6 +103,9 @@ static int is_multimedia_file(const unsigned char *s, const char *sub)
 	return !strncasecmp(s + slen - sublen, sub, sublen);
 }
 
+/*
+ * Set multimedia files as cold files for hot/cold data separation
+ */
 static inline void set_cold_files(struct f2fs_sb_info *sbi, struct inode *inode,
 		const unsigned char *name)
 {
@@ -299,7 +306,7 @@ static int f2fs_unlink(struct inode *dir, struct dentry *dentry)
 	f2fs_delete_entry(de, page, dir, inode);
 	f2fs_unlock_op(sbi);
 
-	
+	/* In order to evict this inode, we set it dirty */
 	mark_inode_dirty(inode);
 
 	if (IS_DIRSYNC(dir))
@@ -317,7 +324,7 @@ static void *f2fs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	if (IS_ERR(page))
 		return page;
 
-	
+	/* this is broken symlink case */
 	if (*nd_get_link(nd) == 0) {
 		kunmap(page);
 		page_cache_release(page);
@@ -401,6 +408,15 @@ err_out:
 	d_instantiate(dentry, inode);
 	unlock_new_inode(inode);
 
+	/*
+	 * Let's flush symlink data in order to avoid broken symlink as much as
+	 * possible. Nevertheless, fsyncing is the best way, but there is no
+	 * way to get a file descriptor in order to flush that.
+	 *
+	 * Note that, it needs to do dir->fsync to make this recoverable.
+	 * If the symlink path is stored into inline_data, there is no
+	 * performance regression.
+	 */
 	if (!err)
 		filemap_write_and_wait_range(inode->i_mapping, 0, p_len - 1);
 
@@ -661,7 +677,7 @@ static void *f2fs_encrypted_follow_link(struct dentry *dentry,
 	caddr = kmap(cpage);
 	caddr[size] = 0;
 
-	
+	/* Symlink is encrypted */
 	sd = (struct f2fs_encrypted_symlink_data *)caddr;
 	cstr.len = le16_to_cpu(sd->len);
 	cstr.name = kmalloc(cstr.len, GFP_NOFS);
@@ -671,7 +687,7 @@ static void *f2fs_encrypted_follow_link(struct dentry *dentry,
 	}
 	memcpy(cstr.name, sd->encrypted_path, cstr.len);
 
-	
+	/* this is broken symlink case */
 	if (cstr.name[0] == 0 && cstr.len == 0) {
 		res = -ENOENT;
 		goto errout;
@@ -679,7 +695,7 @@ static void *f2fs_encrypted_follow_link(struct dentry *dentry,
 
 	if ((cstr.len + sizeof(struct f2fs_encrypted_symlink_data) - 1) >
 								max_size) {
-		
+		/* Symlink data on the disk is corrupted */
 		res = -EIO;
 		goto errout;
 	}
@@ -695,7 +711,7 @@ static void *f2fs_encrypted_follow_link(struct dentry *dentry,
 
 	paddr = pstr.name;
 
-	
+	/* Null-terminate the name */
 	paddr[res] = '\0';
 	nd_set_link(nd, paddr);
 

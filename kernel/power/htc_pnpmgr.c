@@ -23,7 +23,7 @@
 #include "power.h"
 
 #define MAX_BUF     100
-#define MAX_VALUE   999999999    
+#define MAX_VALUE   999999999    // To avoid pnp apply thermal condition right after boot up
 
 enum {
 	BC_TYPE = 0,
@@ -45,25 +45,25 @@ static struct kobject *hotplug_kobj[MAX_TYPE];
 static struct kobject **cpuX_kobj[MAX_TYPE];
 
 struct pnp_cluster_info {
-	
-	cpumask_t cpu_mask;        
-	int mp_cpunum_max;          
-	int mp_cpunum_min;          
-	int user_cpunum_max;        
-	int user_cpunum_min;        
-	
-	int max_freq_info;          
-	int min_freq_info;          
-	int *thermal_freq;          
-	int user_perf_lvl;          
-	int user_lvl_to_min_freq;   
-	
-	int cpu_seq[NR_CPUS];       
-	int cpunum_max;             
-	int cpunum_min;             
-	int num_cpus;               
-	int is_sync;                
-	int *perf_table;            
+	// hotplug
+	cpumask_t cpu_mask;        // The cpus map in a cluster
+	int mp_cpunum_max;          // Used by pnp to notify mp max cpu num
+	int mp_cpunum_min;          // Used by pnp to notify mp min cpu num
+	int user_cpunum_max;        // Used by HAL to notify pnp max cpu num
+	int user_cpunum_min;        // Used by HAL to notify pnp min cpu num
+	// cpufreq
+	int max_freq_info;          // The cpuinfo max freq (RO)
+	int min_freq_info;          // The cpuinfo min freq (RO)
+	int *thermal_freq;          // Used by pnp to limit cpu freq due to high temperature
+	int user_perf_lvl;          // Used by HAL to set perf level
+	int user_lvl_to_min_freq;   // Transfer perf level to min freq (RO)
+	// internally used
+	int cpu_seq[NR_CPUS];       // The cpu order to bring up
+	int cpunum_max;             // Record current max cpu num set by HAL
+	int cpunum_min;             // Record current min cpu num set by HAL
+	int num_cpus;               // The cpu total num in a cluster (fix)
+	int is_sync;                // Sync or async cpu arch platform
+	int *perf_table;            // Platform-specific perf table
 };
 
 #define define_string_show(_name, str_buf)				\
@@ -113,6 +113,7 @@ static char media_mode_buf[MAX_BUF];
 static int app_timeout_expired;
 static int is_touch_boosted;
 static int touch_boost_duration_value = 200;
+//long duration,
 static int is_long_duration_touch_boosted;
 static int long_duration_touch_boost_duration_value = 3000;
 
@@ -214,6 +215,9 @@ int pnpmgr_battery_charging_enabled(int charging_enabled)
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
+/*
+ * Multi-core tunables
+ */
 static char mp_nw_arg[MAX_BUF];
 static char mp_tw_arg[MAX_BUF];
 static char mp_ns_arg[MAX_BUF];
@@ -279,13 +283,19 @@ power_attr(mp_util_low_and);
 define_string_show(mp_util_low_or, mp_util_low_or_arg);
 define_string_store(mp_util_low_or, mp_util_low_or_arg, null_cb);
 power_attr(mp_util_low_or);
-#endif 
+#endif /* CONFIG_HOTPLUG_CPU */
 
+/*
+ * systrace used
+ */
 static int trace_trigger_value = 0;
 define_int_show(trace_trigger, trace_trigger_value);
 define_int_store(trace_trigger, trace_trigger_value, null_cb);
 power_attr(trace_trigger);
 
+/*
+ * touch boost
+ */
 define_int_show(touch_boost_duration, touch_boost_duration_value);
 define_int_store(touch_boost_duration, touch_boost_duration_value, null_cb);
 power_attr(touch_boost_duration);
@@ -323,6 +333,9 @@ touch_boost_store(struct kobject *kobj, struct kobj_attribute *attr,
 }
 power_attr(touch_boost);
 
+/*
+ * long duration touch boost
+ */
 
 define_int_show(long_duration_touch_boost_duration, long_duration_touch_boost_duration_value);
 define_int_store(long_duration_touch_boost_duration, long_duration_touch_boost_duration_value, null_cb);
@@ -360,6 +373,9 @@ long_duration_touch_boost_store(struct kobject *kobj, struct kobj_attribute *att
 }
 power_attr(long_duration_touch_boost);
 
+/*
+ * application related
+ */
 int launch_event_enabled = 0;
 define_int_show(launch_event, launch_event_enabled);
 define_int_store(launch_event, launch_event_enabled, null_cb);
@@ -395,6 +411,9 @@ app_timeout_store(struct kobject *kobj, struct kobj_attribute *attr,
 }
 power_attr(app_timeout);
 
+/*
+ * cluster info
+ */
 static struct pnp_cluster_info info[MAX_TYPE];
 static int cluster_num = 0;
 
@@ -432,17 +451,17 @@ cpu_seq_store(struct kobject *kobj, struct kobj_attribute *attr,
 	cpumask_copy(&bc_mask, &info[BC_TYPE].cpu_mask);
 	cpumask_copy(&lc_mask, &info[LC_TYPE].cpu_mask);
 
-	
+	// Store input value to temp buffer.
 	while ((pch = strsep(&tmp, " ,.-=")) != NULL) {
 		cpu_seq[num] = simple_strtoul(pch, NULL, 10);
 		cpumask_set_cpu(cpu_seq[num], &cpu_mask);
 		num++;
 	}
 
-	
+	// Filter out impossible cpu.
 	cpumask_and(&cpu_mask, &cpu_mask, cpu_possible_mask);
 
-	
+	// Find the big/LITTLE cpu's sequence.
 	for (i = 0; i < num; i++) {
 		if (cpumask_test_cpu(cpu_seq[i], &info[BC_TYPE].cpu_mask)) {
 			info[BC_TYPE].cpu_seq[bc++] = cpu_seq[i];
@@ -454,7 +473,7 @@ cpu_seq_store(struct kobject *kobj, struct kobj_attribute *attr,
 		}
 	}
 
-	
+	// For the remaining cpus, set it sequentially.
 	for (cpu = -1, i = bc; i < info[BC_TYPE].num_cpus; i++) {
 		cpu = cpumask_next(cpu, &bc_mask);
 		info[BC_TYPE].cpu_seq[i] = cpu;
@@ -552,6 +571,12 @@ user_cpunum_max_store(struct kobject *kobj, struct kobj_attribute *attr,
 	int type = get_cluster_type(kobj);
 	int val, bit, on;
 
+	/*
+	 * The HAL layer will set different value according to each cpu num:
+	 *   cpu num: 1 / 2 / 3 / 4
+	 *    enable: 1 / 3 / 5 / 7
+	 *   disabel: 0 / 2 / 4 / 6
+	 */
 	if (sscanf(buf, "%d", &val) > 0) {
 		bit = val / 2;
 		on = val % 2;
@@ -593,6 +618,12 @@ user_cpunum_min_store(struct kobject *kobj, struct kobj_attribute *attr,
 	int type = get_cluster_type(kobj);
 	int val, bit, on;
 
+	/*
+	 * The HAL layer will set different value according to each cpu num:
+	 *   cpu num: 1 / 2 / 3 / 4
+	 *    enable: 1 / 3 / 5 / 7
+	 *   disabel: 0 / 2 / 4 / 6
+	 */
 	if (sscanf(buf, "%d", &val) > 0) {
 		bit = val / 2;
 		on = val % 2;
@@ -609,6 +640,7 @@ user_cpunum_min_store(struct kobject *kobj, struct kobj_attribute *attr,
 }
 power_attr(user_cpunum_min);
 
+// cpufreq
 define_cluster_info_show(max_freq_info);
 power_ro_attr(max_freq_info);
 
@@ -659,17 +691,26 @@ scaling_max_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	get_online_cpus();
 
+	/*
+	 * In sync cpu platform, sometime the first cpu isn't included in
+	 * the active cpus. It will make trouble if we only consider the
+	 * first cpu. So we should find the active cpu instead of the first
+	 * cpu in the cluster to apply our new setting.
+	 */
 	if (info[type].is_sync) {
 		for_each_cpu_and(rcpu, &info[type].cpu_mask, cpu_online_mask) {
 			ret = 1;
 			break;
 		}
 		if (!ret) {
-			
+			//pr_warn("%s: No online cpus in cluster%d\n", __func__, type);
 			ret = -EPERM;
 			goto failure;
 		}
 	} else {
+		/*
+		 * In async cpu platform, the fcpu is treated as the cpu order.
+		 */
 		sscanf(kobj->name, "cpu%d", &fcpu);
 		rcpu = info[type].cpu_seq[fcpu];
 		if (!cpu_online(rcpu)) {
@@ -679,7 +720,7 @@ scaling_max_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 		}
 	}
 
-	
+	// Verify the limits.
 	ret = cpufreq_get_policy(&new_policy, rcpu);
 	if (ret) {
 		pr_warn("%s: Fail to copy cpu%d policy\n", __func__, rcpu);
@@ -694,7 +735,7 @@ scaling_max_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	scaling_freq_verify(&new_policy);
 
-	
+	// Now, we can start to update the frequency.
 	policy = cpufreq_cpu_get(rcpu);
 	if (!policy || !policy->governor) {
 		pr_warn("%s: cpu%d policy or governor is NULL\n", __func__, rcpu);
@@ -766,17 +807,26 @@ scaling_min_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	get_online_cpus();
 
+	/*
+	 * In sync cpu platform, sometime the first cpu isn't included in
+	 * the active cpus. It will make trouble if we only consider the
+	 * first cpu. So we should find the active cpu instead of the first
+	 * cpu in the cluster to apply our new setting.
+	 */
 	if (info[type].is_sync) {
 		for_each_cpu_and(rcpu, &info[type].cpu_mask, cpu_online_mask) {
 			ret = 1;
 			break;
 		}
 		if (!ret) {
-			
+			//pr_warn("%s: No online cpus in cluster%d\n", __func__, type);
 			ret = -EPERM;
 			goto failure;
 		}
 	} else {
+		/*
+		 * In async cpu platform, the fcpu is treated as the cpu order.
+		 */
 		sscanf(kobj->name, "cpu%d", &fcpu);
 		rcpu = info[type].cpu_seq[fcpu];
 		if (!cpu_online(rcpu)) {
@@ -786,7 +836,7 @@ scaling_min_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 		}
 	}
 
-	
+	// Verify the limits.
 	ret = cpufreq_get_policy(&new_policy, rcpu);
 	if (ret) {
 		pr_warn("%s: Fail to copy cpu%d policy\n", __func__, rcpu);
@@ -801,7 +851,7 @@ scaling_min_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	scaling_freq_verify(&new_policy);
 
-	
+	// Now, we can start to update the frequency.
 	policy = cpufreq_cpu_get(rcpu);
 	if (!policy || !policy->governor) {
 		pr_warn("%s: cpu%d policy or governor is NULL\n", __func__, rcpu);
@@ -851,7 +901,7 @@ thermal_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 	int type = get_cluster_type(kobj);
 	int val, cpu;
 
-	
+	// Apply any value and then correct it in the scaling_x_freq code.
 	if (sscanf(buf, "%d", &val) > 0) {
 		sscanf(kobj->name, "cpu%d", &cpu);
 		info[type].thermal_freq[cpu] = val;
@@ -862,6 +912,9 @@ thermal_freq_store(struct kobject *kobj, struct kobj_attribute *attr,
 }
 power_attr(thermal_freq);
 
+/*
+ * User level perflock
+ */
 static int perf_value = 0;
 static struct user_perf_data *pnp_perf_data;
 void pnpmgr_init_perf_table(struct user_perf_data *pdata)
@@ -887,6 +940,12 @@ user_perf_lvl_store(struct kobject *kobj, struct kobj_attribute *attr,
 	if (!info[type].perf_table)
 		return -EINVAL;
 
+	/*
+	 * The HAL layer will set different value according to each level:
+	 *     level: 1 / 2 / 3 / 4 / 5
+	 *    enable: 1 / 3 / 5 / 7 / 9
+	 *   disabel: 0 / 2 / 4 / 6 / 8
+	 */
 	if (sscanf(buf, "%d", &val) > 0) {
 		bit = val / 2;
 		on = val % 2;
@@ -916,6 +975,9 @@ power_attr(user_perf_lvl);
 define_cluster_info_show(user_lvl_to_min_freq);
 power_ro_attr(user_lvl_to_min_freq);
 
+/*
+ * Multi-core tunables
+ */
 static struct attribute *mp_hotplug_g[] = {
 #ifdef CONFIG_HOTPLUG_CPU
 	&mp_nw_attr.attr,
@@ -935,6 +997,9 @@ static struct attribute *mp_hotplug_g[] = {
 	NULL,
 };
 
+/*
+ * Thermal conditions
+ */
 static struct attribute *thermal_g[] = {
 	&thermal_g0_attr.attr,
 	&thermal_final_bcpu_attr.attr,
@@ -1041,7 +1106,7 @@ static struct attribute_group cluster_type_attr_group = {
 static int __cpuinit cpu_hotplug_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
 	switch (action) {
-		
+		/* To reduce overhead, we only notify cpu plug */
 		case CPU_ONLINE:
 		case CPU_ONLINE_FROZEN:
 			sysfs_notify(pnpmgr_kobj, NULL, "default_rule");
@@ -1055,7 +1120,7 @@ static int __cpuinit cpu_hotplug_callback(struct notifier_block *nfb, unsigned l
 
 static struct notifier_block __refdata cpu_hotplug_notifier = {
 	.notifier_call = cpu_hotplug_callback,
-	.priority = -10, 
+	.priority = -10, //after cpufreq.c:cpufreq_cpu_notifier -> cpufreq_add_dev()
 };
 #endif
 
@@ -1090,6 +1155,12 @@ static int get_cpu_frequency(struct cpumask *mask, int *min, int *max)
 	struct cpufreq_frequency_table *table;
 	int i = 0, cpu;
 
+	/*
+	 * The cpu governor may not be ready or cpu may be offline by other
+	 * reason during boot time. So to make sure we can always get the
+	 * cpu frequency, we need to use the original API instead of using
+	 * governor's provided API.
+	 */
 	for_each_cpu(cpu, mask) {
 		table = cpufreq_frequency_get_table(cpu);
 		if (table)
@@ -1121,11 +1192,24 @@ static int init_cluster_info_by_topology(void)
 	for (i = 0; i < MAX_TYPE; i++)
 		memset(&info[i], 0, sizeof(struct pnp_cluster_info));
 
+	/*
+	 * Starting at cpu0 to track how many cpus in current platform.
+	 * If it's b.L arch, assuming that the big cluster's max freq
+	 * is always larger than little cluster's. Thus, we can know
+	 * this platform's cpu map.
+	 */
 	mask[0] = topology_core_cpumask(0);
 	base[0] = cpumask_first(mask[0]);
 	if (get_cpu_frequency(mask[0], &minfreq[0], &maxfreq[0]))
 		return -EINVAL;
 
+	/*
+	 * If the weight retrieved from cpu0 is equal to current cpu number,
+	 * it must be normal plaform. Otherwise, it must be big-LITTLE (b.L)
+	 * architecture. In the b.L platform, we can not assume the cpu order
+	 * is always by sequentially. Hence, we need to use cpu_possible_mask
+	 * to take away the first mask to get second mask.
+	 */
 	if (cpumask_weight(mask[0]) == num_possible_cpus()) {
 		cluster_num = 1;
 	} else {
@@ -1135,7 +1219,7 @@ static int init_cluster_info_by_topology(void)
 		if (get_cpu_frequency(mask[1], &minfreq[1], &maxfreq[1]))
 			return -EINVAL;
 
-		
+		// always let big cluster at the first group
 		if (maxfreq[0] < maxfreq[1]) {
 			swap_value(mask[0], mask[1]);
 			swap_value(base[0], base[1]);
@@ -1152,12 +1236,27 @@ static int init_cluster_info_by_topology(void)
 		info[i].max_freq_info = maxfreq[i];
 		info[i].min_freq_info = minfreq[i];
 
+		/*
+		 * Initial the cpu's online order, this is also the sequence of
+		 * setting cpu's frequency.
+		 */
 		info[i].cpu_seq[0] = base[i];
 		for (j = 1; j < info[i].num_cpus; j++)
 			info[i].cpu_seq[j] = cpumask_next(info[i].cpu_seq[j-1], mask[i]);
 
+		/*
+		 * To check whether it's sync cpu platform or not, we should
+		 * examine the cpus' clock sources. Using governor's API is
+		 * very dangerous because when cpu is offline, the policy will
+		 * become null and we could get wrong information from it.
+		 */
 		info[i].is_sync = is_sync_cpu(mask[i], base[i]);
 
+		/*
+		 * Do allocation only for the first cpu in sync cpu platform.
+		 * Other cpus will reference the first cpu's value. For async
+		 * cpu platform, allocating the total cpu numbers.
+		 */
 		k = info[i].is_sync ? 1 : info[i].num_cpus;
 
 		info[i].thermal_freq = kzalloc(k * sizeof(int), GFP_KERNEL);
@@ -1210,12 +1309,27 @@ static int init_cluster_info_by_dt(const struct device_node *node)
 		info[i].min_freq_info = minfreq;
 		cpumask_copy(&info[i].cpu_mask, &cluster_cpus[i]);
 
+		/*
+		 * Initial the cpu's online order, this is also the sequence of
+		 * setting cpu's frequency.
+		 */
 		info[i].cpu_seq[0] = first_cpu;
 		for (j = 1; j < info[i].num_cpus; j++)
 			info[i].cpu_seq[j] = cpumask_next(info[i].cpu_seq[j-1], &cluster_cpus[i]);
 
+		/*
+		 * To check whether it's sync cpu platform or not, we should
+		 * examine the cpus' clock sources. Using governor's API is
+		 * very dangerous because when cpu is offline, the policy will
+		 * become null and we could get wrong information from it.
+		 */
 		info[i].is_sync = is_sync_cpu(&cluster_cpus[i], first_cpu);
 
+		/*
+		 * Do allocation only for the first cpu in sync cpu platform.
+		 * Other cpus will reference the first cpu's value. For async
+		 * cpu platform, allocating the total cpu numbers.
+		 */
 		k = info[i].is_sync ? 1 : info[i].num_cpus;
 
 		info[i].thermal_freq = kzalloc(k * sizeof(int), GFP_KERNEL);
@@ -1337,7 +1451,7 @@ static int init_cluster_info(void)
 		}
 	}
 
-	
+	// Fixup max frequency...
 	if (info[BC_TYPE].perf_table) {
 		for (i = 0; i < USER_PERF_LVL_TOTAL; i++) {
 			if (info[BC_TYPE].perf_table[i] > info[BC_TYPE].max_freq_info)
@@ -1387,6 +1501,10 @@ static int __init pnpmgr_init(void)
 		goto err;
 	}
 
+	/*
+	 * This is the main function to construct our platform's cpu overall
+	 * map. It uses some topology kernel API to get the information.
+	 */
 	if ((ret = init_cluster_info()) < 0)
 		goto err;
 
@@ -1405,6 +1523,11 @@ static int __init pnpmgr_init(void)
 			goto err;
 		}
 
+		/*
+		 * Do allocation only for the first cpu in sync cpu platform.
+		 * Other cpus will reference the first cpu's value. For async
+		 * cpu platform, allocating the total cpu numbers.
+		 */
 		if (info[i].is_sync)
 			cpuX_kobj[i] = kzalloc(sizeof(struct kobject *), GFP_KERNEL);
 		else
@@ -1417,6 +1540,11 @@ static int __init pnpmgr_init(void)
 			goto err;
 		}
 
+		/*
+		 * In sync cpu platform, we use symlink to link current cpu to
+		 * the first cpu (cpu0). This can avoid inconsistent problem.
+		 * In async cpu platform, just create seperate nodes.
+		 */
 		for (j = 1; j < info[i].num_cpus; j++) {
 			scnprintf(buf, sizeof(buf), "cpu%d", j);
 
@@ -1438,6 +1566,9 @@ static int __init pnpmgr_init(void)
 		}
 	}
 
+	/*
+	 * Create all attribute group under each node.
+	 */
 	ret = sysfs_create_group(pnpmgr_kobj, &pnpmgr_attr_group);
 	ret |= sysfs_create_group(mp_hotplug_kobj, &mp_hotplug_attr_group);
 	ret |= sysfs_create_group(thermal_kobj, &thermal_attr_group);

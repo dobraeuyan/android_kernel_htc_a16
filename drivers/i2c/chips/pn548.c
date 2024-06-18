@@ -125,6 +125,9 @@ static int pn544_RxData(uint8_t *rxData, int length)
 			I2C_RETRY_COUNT);
 		return -EIO;
 	}
+	/* pn548 seems to be slow in handling I2C read requests
+	 * so add 1ms delay after recv operation
+	 * Sync from AOSP and NXP pn548.c */
 	mdelay(1);
 	return 0;
 }
@@ -159,6 +162,9 @@ static int pn544_TxData(uint8_t *txData, int length)
 			__func__, I2C_RETRY_COUNT);
 		return -EIO;
 	}
+	/* pn548 seems to be slow in handling I2C write requests
+	 * so add 1ms delay after send operation
+	 * Sync from AOSP and NXP pn548.c */
 	mdelay(1);
 	return 0;
 }
@@ -187,7 +193,7 @@ static irqreturn_t pn544_dev_irq_handler(int irq, void *dev_id)
 
 	pn544_disable_irq(pn544_dev);
 
-	
+	/* Wake up waiting readers */
 	wake_up(&pn544_dev->read_wq);
 
 	if (time_after(jiffies, orig_jiffies + msecs_to_jiffies(1000)))
@@ -221,7 +227,7 @@ static void pn544_Disable(void)
 static int pn544_isEn(void)
 {
 	struct pn544_dev *pni = pn_info;
-	
+	/* D("%s: isEn=%d\n", __func__, pni->ven_value); */
 	return pni->ven_value;
 }
 
@@ -278,7 +284,7 @@ static ssize_t pn544_dev_read(struct file *filp, char __user *buf,
 
 	pni->isReadBlock = false;
     wake_lock_timeout(&pni ->io_wake_lock, IO_WAKE_LOCK_TIMEOUT);
-	
+	/* Read data */
 	memset(read_buffer, 0, MAX_BUFFER_SIZE);
 	ret = pn544_RxData(read_buffer, count);
 	mutex_unlock(&pni->read_mutex);
@@ -339,7 +345,7 @@ static ssize_t pn544_dev_write(struct file *filp, const char __user *buf,
 
 	DBUF(buffer, count);
 
-	
+	/* Write data */
 	ret = pn544_TxData(buffer, count);
 	if (ret < 0) {
 		E("%s : i2c_master_send returned %d\n", __func__, ret);
@@ -373,9 +379,11 @@ static long pn544_dev_ioctl(struct file *filp,
 	switch (cmd) {
 	case PN544_SET_PWR:
 		if (arg == 3) {
-			
+			/* Software reset */
 			E("%s Useless !!!!! arg=3 for PN548\n", __func__);
 		} else if (arg == 2) {
+			/* power on with firmware download (requires hw reset)
+			 */
 			I("%s power on with firmware\n", __func__);
 			pn544_Enable();
 			msleep(20);
@@ -386,7 +394,7 @@ static long pn544_dev_ioctl(struct file *filp,
 			pn544_Enable();
 			msleep(20);
 		} else if (arg == 1) {
-			
+			/* power on */
 			I("%s power on delay 100ms\n", __func__);
 			gpio_set_value(pni->firm_gpio, 0);
 			pn544_Enable();
@@ -395,7 +403,7 @@ static long pn544_dev_ioctl(struct file *filp,
 			s_wdcmd_cnt = 0;
 			I("%s pn544_Enable, set is_debug = %d, s_wdcmd_cnt : %d\n", __func__, is_debug, s_wdcmd_cnt);
 		} else  if (arg == 0) {
-			
+			/* power off */
 			I("%s power off delay 100ms\n", __func__);
 			gpio_set_value(pni->firm_gpio, 0);
 			pn544_Disable();
@@ -521,6 +529,12 @@ void nfc_nci_dump_data(unsigned char *data, int len) {
 }
 
 
+//	nci_reader return conditions:
+//	-255: i2c error, break
+//	-1: script request condition not reached, stay at current
+//	 0: script restart
+//	 1: script request condition reached
+//	 other n: go to scriptIndex n
 
 
 int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
@@ -582,15 +596,15 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 		}
 	}
 
-	
-	
+	/* Bypass separate package first, not used by either source currently */
+	/* process responses */
 	if (0x40 == (nci_read_header[0] & 0xF0)) {
 		GOID = nci_read_header[0] & 0x0F;
 		GOID = (GOID << 8) | nci_read_header[1];
 		I("GOID: 0x%08X\r\n", GOID);
 
 		switch (GOID) {
-		case 0x0000: 
+		case 0x0000: /* Case CORE_RESET_RSP */
 			I("Response CORE_RESET_RSP received.\r\n");
 			if (*(script->exp_resp_content)) {
 				if (memcmp(nci_read_header, expect_resp_header, 2) == 0){
@@ -608,7 +622,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 			}
 			gDevice_info.NCI_version = receiverBuffer[1];
 			break;
-		case 0x0001: 
+		case 0x0001: /* Case CORE_INIT_RSP */
 			I("Response CORE_INIT_RSP received.\r\n");
 			if (*(script->exp_resp_content)) {
 				if (memcmp(nci_read_header, expect_resp_header, 2) == 0){
@@ -631,7 +645,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 			I("FW Version 0x%07lX\r\n", gDevice_info.fwVersion);
 			mfc_nfc_cmd_result = (int)gDevice_info.fwVersion;
 			break;
-		case 0x0103: 
+		case 0x0103: /* Case RF_DISCOVER_RSP */
 			I("Response RF_DISCOVER_RSP received.\r\n");
 			if (*(script->exp_resp_content)) {
 				if (memcmp(nci_read_header, expect_resp_header, 2) == 0){
@@ -651,10 +665,10 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 				I("Start to detect Cards.\r\n");
 			else
 				I("Start to listen Reader.\r\n");
-			
+			/* Set target NTF as RF_INTF_ACTIVATED_NTF */
 			expect_ntf_header[1] = 0x05;
 			break;
-		case 0x0200: 
+		case 0x0200: /* Case NFCEE_DISCOVER_RSP */
 			I("Response NFCEE_DISCOVER_RSP received.\r\n");
 			if (*(script->exp_resp_content)) {
 				if (memcmp(nci_read_header, expect_resp_header, 2) == 0){
@@ -670,10 +684,10 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 					I("Command-Response type not matched, ignore.\r\n");
 				}
 			}
-			
+			/* Set target NTF as NFCEE_DISCOVER_NTF */
 			expect_ntf_header[1] = 0x00;
 			break;
-		case 0x0201: 
+		case 0x0201: /* Case NFCEE_MODE_SET_RSP */
 			I("Response NFCEE_MODE_SET_RSP received.\r\n");
 			if (*(script->exp_resp_content)) {
 				if (memcmp(nci_read_header, expect_resp_header, 2) == 0){
@@ -689,12 +703,13 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 					I("Command-Response type not matched, ignore.\r\n");
 				}
 			}
-			
+			/* Set target NTF as NFCEE_DISCOVER_NTF */
 			expect_ntf_header[1] = 0x00;
 			break;
 
 #if FTM_NFC_CPLC
-#endif 
+//removed
+#endif //FTM_NFC_CPLC
 		default:
 			I("Response not defined.\r\n");
 			if (*(script->exp_resp_content)) {
@@ -715,7 +730,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 		}
 	}
 
-	
+	/* process data packets */
 	if (0x00 == (nci_read_header[0] & 0xF0)) {
 		I("Data Packet, Connection ID:0x%02X\r\n", (nci_read_header[0] & 0x0F));
 		if (*(script->exp_resp_content)) {
@@ -737,7 +752,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 			expect_ntf_header[1] = 0x06;
 	}
 
-	
+	/* process notifications */
 	if (0x60 == (nci_read_header[0] & 0xF0)) {
 		GOID = nci_read_header[0] & 0x0F;
 		GOID = (GOID << 8) | nci_read_header[1];
@@ -746,7 +761,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 		switch (GOID) {
 		case 0x0103:
 			I("Notification RF_DISCOVER_NTF received.\r\n");
-			if (*(script->exp_ntf)) { 
+			if (*(script->exp_ntf)) { /*Case when expected multiple remote SE NTF coming*/
 				if (memcmp(nci_read_header, expect_ntf_header, 2) == 0){
 					I("Notification type matched with command.\r\n");
 					if (memcmp(&script->exp_ntf[1], receiverBuffer, script->exp_ntf[0]) == 0) {
@@ -757,8 +772,8 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 						return -1;
 					}
 				} else {
-					
-					
+					//I("Command-Notification type not matched, ignore.\r\n");
+					/* Case when waiting for RF_INTF_ACTIVATED_NTF but multiple NTF detected */
 					gDevice_info.NTF_queue[gDevice_info.NTF_count].RF_ID = receiverBuffer[0];
 					gDevice_info.NTF_queue[gDevice_info.NTF_count].RF_Protocol = receiverBuffer[1];
 					gDevice_info.NTF_queue[gDevice_info.NTF_count].RF_Technology = receiverBuffer[2];
@@ -772,12 +787,16 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 						select_rf_target[0].cmd[4] = gDevice_info.target_rf_id;
 						select_rf_target[0].cmd[5] = gDevice_info.protocol_set;
 						select_rf_target[0].cmd[6] = gDevice_info.intf_set;
+//						if (script_processor(select_rf_target, sizeof(select_rf_target)) == 0)
+//							return 1;
+//						else
+//							return -1;
 					}
 				}
 			}
 			gDevice_info.NTF_count++;
 			break;
-		case 0x0105: 
+		case 0x0105: /* Case RF_INTF_ACTIVATED_NTF */
 			I("Notification RF_INTF_ACTIVATED_NTF received.\r\n");
 			if (*(script->exp_ntf)) {
 				if (memcmp(nci_read_header, expect_ntf_header, 2) == 0){
@@ -799,7 +818,7 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 			else
 				I("Reader detected!\r\n");
 			break;
-		case 0x0200: 
+		case 0x0200: /* Case NFCEE_DISCOVER_NTF */
 			I("Notification NFCEE_DISCOVER_NTF received.\r\n");
 			if (*(script->exp_ntf)) {
 				if (memcmp(nci_read_header, expect_ntf_header, 2) == 0){
@@ -818,7 +837,8 @@ int nci_Reader(control_msg_pack *script, unsigned int scriptSize) {
 			gDevice_info.HW_model = receiverBuffer[1];
 			break;
 #if FTM_NFC_CPLC
-#endif 
+//removed
+#endif //FTM_NFC_CPLC
 		default:
 			I("Notification not defined.\r\n");
 			if (*(script->exp_ntf)) {
@@ -890,21 +910,21 @@ do { \
 	} \
 	if (gpio_get_value(pni->irq_gpio)) { \
 		reader_resp = nci_Reader(&script[scriptIndex], scriptSize); \
-		 \
+		/*I("%d returned.\r\n", reader_resp);*/ \
 		switch(reader_resp) { \
 		case -255: \
-			 \
+			/* I2C error, break*/ \
 			goto I2C_FAIL; \
 			break; \
 		case -1: \
-			 \
+			/* stay at current command.*/ \
 			break; \
 		case 0: \
-			 \
+			/* script restart */ \
 			scriptIndex = 0; \
 			break; \
 		case 1: \
-			 \
+			/* step to next command. */ \
 			scriptIndex++; \
 			break; \
 		default: \
@@ -1006,7 +1026,7 @@ static int mfg_nfc_test(int code)
 	I("%s: store value = %d\n", __func__, code);
 
 	switch (code) {
-	case 0:  
+	case 0:  // get nfc FW version
 		I("%s: get nfcversion :\n", __func__);
 		pn544_hw_reset_control(1);
 		if (script_processor(nfc_version_script, sizeof(nfc_version_script)) == 0) {
@@ -1014,7 +1034,7 @@ static int mfg_nfc_test(int code)
 		}
 		pn544_hw_reset_control(0);
 		break;
-	case 1:  
+	case 1:  // reader mode test
 		I("%s: nfcreader test :\n", __func__);
 		pn544_hw_reset_control(1);
 		if (script_processor(nfc_reader_script, sizeof(nfc_reader_script)) == 0) {
@@ -1023,7 +1043,7 @@ static int mfg_nfc_test(int code)
 		}
 		pn544_hw_reset_control(0);
 		break;
-	case 2:  
+	case 2:  // card mode test
 		I("%s: nfccard test :\n", __func__);
 		pn544_hw_reset_control(1);
 		if (script_processor(nfc_card_script, sizeof(nfc_card_script)) == 0) {
@@ -1033,14 +1053,17 @@ static int mfg_nfc_test(int code)
 		pn544_hw_reset_control(0);
 		break;
 #if FTM_NFC_CPLC
-#endif  
+//removed
+#endif  //FTM_NFC_CPLC
 	case 99:
+//PN548 Standby mode workaround++
 		I("%s: nfc_standby_enble_script :\n", __func__);
 		pn544_hw_reset_control(1);
 		if (script_processor(nfc_standby_enble_script, sizeof(nfc_standby_enble_script)) == 0) {
 			I("%s: store value = %d\n", __func__, code);
 			mfc_nfc_cmd_result = 1;
 		}
+//PN548 Standby mode workaround--
 		pn544_hw_reset_control(0);
 		I("Turn off NFC_PVDD");
 #if defined(CONFIG_MACH_A16)
@@ -1183,7 +1206,7 @@ static int pn544_parse_dt(struct device *dev, struct pn544_i2c_platform_data *pd
 		goto parse_error;
 	}
 
-	
+	/* irq, ven, firm gpio info */
 	pdata->irq_gpio = of_get_named_gpio_flags(dt, "nxp,irq-gpio",
 				0, &pdata->irq_gpio_flags);
 	if(pdata->irq_gpio < 0) {
@@ -1398,13 +1421,13 @@ static int pn544_probe(struct i2c_client *client,
 			 return  -ENODEV;
 		 }
 	}
-        
+        /* NFC_1V8 */
         if (!pn544_htc_pvdd_on (client)) {
                 E("%s : Turn On NFC_PVDD fail\n", __func__);
                 ret = -ENODEV;
                 goto err_exit;
         }
-	
+	/* IRQ_GPIO */
 	ret = gpio_request(platform_data->irq_gpio, "nfc_int");
 	if (ret) {
 		E("%s : request gpio%d fail\n",
@@ -1413,7 +1436,7 @@ static int pn544_probe(struct i2c_client *client,
 		goto err_exit;
 	}
 
-	
+	/* NFC_EN GPIO */
 	ret = gpio_request(platform_data->ven_gpio, "nfc_en");
 	if (ret) {
 		E("%s : request gpio %d fail\n",
@@ -1421,7 +1444,7 @@ static int pn544_probe(struct i2c_client *client,
 		ret = -ENODEV;
 		goto err_request_gpio_ven;
 	}
-	
+	/* NFC_FIRM GPIO */
 
 	ret = gpio_request(platform_data->firm_gpio, "nfc_firm");
 	if (ret) {
@@ -1463,7 +1486,7 @@ static int pn544_probe(struct i2c_client *client,
 	ret = gpio_direction_output(pni->firm_gpio, 0);
 	I("%s : firm_gpio set 0 %d \n", __func__,ret);
 
-	
+	/* init mutex and queues */
 	init_waitqueue_head(&pni->read_wq);
 	mutex_init(&pni->read_mutex);
 	spin_lock_init(&pni->irq_enabled_lock);
@@ -1481,6 +1504,9 @@ static int pn544_probe(struct i2c_client *client,
 	}
 
 
+	/* request irq.  the irq is set whenever the chip has data available
+	 * for reading.  it is cleared when all data has been read.
+	 */
 	client->irq = gpio_to_irq(platform_data->irq_gpio);
 	I("%s : requesting IRQ %d\n", __func__, client->irq);
 
@@ -1510,7 +1536,7 @@ static int pn544_probe(struct i2c_client *client,
 		goto err_create_pn_device;
 	}
 
-	
+	/* register the attributes */
 
 	ret = device_create_file(pni->pn_dev, &dev_attr_debug_enable);
 	if (ret) {
@@ -1530,7 +1556,7 @@ static int pn544_probe(struct i2c_client *client,
 	if (ret) {
 		E("pn544_probe device_create_file dev_attrnxp_uicc_swp failed\n");
 	}
-	watchdog_timeout = WATCHDOG_FTM_TIMEOUT_SEC; 
+	watchdog_timeout = WATCHDOG_FTM_TIMEOUT_SEC; //set default timeout value
 	I("%s: device_create_file for FTM mode+\n", __func__);
 	ret = device_create_file(pni->comn_dev, &dev_attr_mfg_nfc_ctrl);
 	if (ret) {
@@ -1559,7 +1585,7 @@ static int pn544_probe(struct i2c_client *client,
         I("%s: device_create_file for FTM mode done -\n", __func__);
 
 	if (is_alive) {
-		
+		/*Disable NFC if it is not off-mode charging*/
 		if (pni->boot_mode == NFC_BOOT_MODE_OFF_MODE_CHARGING) {
 			I("%s: Turn off NFC PVDD at NFC_BOOT_MODE_OFF_MODE_CHARGING (bootmode = %d)\n", __func__, pni->boot_mode);
                         pn544_Disable();
@@ -1716,6 +1742,9 @@ static struct i2c_driver pn544_driver = {
 #endif
 };
 
+/*
+ * module load/unload record keeping
+ */
 
 static int __init pn544_dev_init(void)
 {

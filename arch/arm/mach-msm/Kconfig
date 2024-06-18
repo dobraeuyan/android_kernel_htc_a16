@@ -418,6 +418,24 @@ config MSM_REMOTE_SPINLOCK_SFPB
 
 menu "MSM Board Selection"
 
+config MACH_A32E
+  depends on ARCH_MSM8909
+  bool "MSM8909 A32E"
+  help
+    Support for HTC MSM8909 A32E
+
+config MACH_A13
+  depends on ARCH_MSM8909
+  bool "MSM8909 A13"
+  help
+    Support for HTC MSM8909 A13
+
+config MACH_A12
+  depends on ARCH_MSM8909
+  bool "MSM8909 A12"
+  help
+    Support for HTC MSM8909 A12
+
 config MACH_A16
   depends on ARCH_MSM8909
   bool "MSM8909 A16"

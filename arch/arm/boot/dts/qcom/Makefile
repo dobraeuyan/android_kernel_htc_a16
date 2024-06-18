@@ -30,10 +30,18 @@ dtb-$(CONFIG_ARCH_MSM8974) += msm8974-v1-cdp.dtb \
 	msm8974pro-ac-pma8084-pm8941-mtp.dtb
 
 ifeq ($(CONFIG_MACH_A32E),y)
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a32e-xa.dtb
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a32e-xc.dtb
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a32e-xd-ca.dtb
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a32e-xd-non-ca.dtb
 else
 ifeq ($(CONFIG_MACH_A13),y)
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a13.dtb
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a12.dtb
 else
 ifeq ($(CONFIG_MACH_A12),y)
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a12.dtb
+dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a13.dtb
 else
 ifeq ($(CONFIG_MACH_A16),y)
 dtb-$(CONFIG_ARCH_MSM8909) += msm8909-htc_a16.dtb

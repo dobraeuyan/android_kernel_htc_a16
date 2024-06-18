@@ -18,6 +18,10 @@
 
 #include "mdss_mdp.h"
 
+	/*
+	 * Value of enum choosen to fit the number of bits
+	 * expected by the HW programming.
+	 */
 enum {
 	COLOR_4BIT,
 	COLOR_5BIT,

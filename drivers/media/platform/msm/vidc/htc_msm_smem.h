@@ -1,6 +1,7 @@
 #include <media/msm_vidc.h>
 #include <linux/kref.h>
 
+//copied from ion.c, remember to sync
 struct ion_handle {
 	struct kref ref;
 	struct ion_client *client;

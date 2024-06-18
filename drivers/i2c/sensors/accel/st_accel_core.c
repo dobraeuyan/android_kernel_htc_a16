@@ -35,16 +35,19 @@
 #define CALIBRATION_DATA_PATH "/calibration_data"
 #define G_SENSOR_FLASH_DATA "gs_flash"
 
+/* DEFAULT VALUE FOR SENSORS */
 #define ST_ACCEL_DEFAULT_OUT_X_L_ADDR		0x28
 #define ST_ACCEL_DEFAULT_OUT_Y_L_ADDR		0x2a
 #define ST_ACCEL_DEFAULT_OUT_Z_L_ADDR		0x2c
 
+/* FULLSCALE */
 #define ST_ACCEL_FS_AVL_2G			2
 #define ST_ACCEL_FS_AVL_4G			4
 #define ST_ACCEL_FS_AVL_6G			6
 #define ST_ACCEL_FS_AVL_8G			8
 #define ST_ACCEL_FS_AVL_16G			16
 
+/* CUSTOM VALUES FOR SENSOR 1 */
 #define ST_ACCEL_1_WAI_EXP			0x33
 #define ST_ACCEL_1_ODR_ADDR			0x20
 #define ST_ACCEL_1_ODR_MASK			0xf0
@@ -72,6 +75,7 @@
 #define ST_ACCEL_1_DRDY_IRQ_MASK		0x10
 #define ST_ACCEL_1_MULTIREAD_BIT		true
 
+/* CUSTOM VALUES FOR SENSOR 2 */
 #define ST_ACCEL_2_WAI_EXP			0x32
 #define ST_ACCEL_2_ODR_ADDR			0x20
 #define ST_ACCEL_2_ODR_MASK			0x18
@@ -95,6 +99,7 @@
 #define ST_ACCEL_2_DRDY_IRQ_MASK		0x02
 #define ST_ACCEL_2_MULTIREAD_BIT		true
 
+/* CUSTOM VALUES FOR SENSOR 3 */
 #define ST_ACCEL_3_WAI_EXP			0x40
 #define ST_ACCEL_3_ODR_ADDR			0x20
 #define ST_ACCEL_3_ODR_MASK			0xf0
@@ -443,7 +448,7 @@ static int st_accel_registerAttr(struct iio_dev *indio_dev)
 		accelerometer_dev = NULL;
 		goto err_create_accelerometer_device;
 	}
-#if 0 
+#if 0 //wait for CIR_ALWAYS_READY ready
 #ifdef CONFIG_CIR_ALWAYS_READY
 	ret = device_create_file(accelerometer_dev, &dev_attr_enable_cir_interrupt);
 

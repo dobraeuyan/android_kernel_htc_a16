@@ -16,12 +16,14 @@
 #define PANEL_ID_A16_TRULY_HX8394D       4
 #define PANEL_ID_A16_SUCCESS_HX8394D     5
 
+/* HTC: dsi_power_data overwrite the role of dsi_drv_cm_data
+   in mdss_dsi_ctrl_pdata structure */
 struct dsi_power_data {
-	uint32_t sysrev;          
-	struct regulator *vddio;  
-	int lcmio_en;             
-	int lcmp5v;               
-	int lcmn5v;               
+	uint32_t sysrev;          /* system revision info */
+	struct regulator *vddio;  /* NCP6924 1.8V */
+	int lcmio_en;             /* 1.8V enable */
+	int lcmp5v;               /* TPS65132 +5.5V */
+	int lcmn5v;               /* TPS65132 -5.5V */
 	int lcm_bl_en;
 };
 
@@ -40,6 +42,7 @@ struct i2c_dev_info {
 	struct i2c_client *client;
 };
 
+/* 7 bit address */
 #define TPS65132_I2C_ADDRESS       0x3E
 #define TPS65132_VPOS_ADDRESS      0x00
 #define TPS65132_VNEG_ADDRESS      0x01
@@ -49,10 +52,10 @@ struct i2c_dev_info {
 	{.dev_addr = addr >> 1, .client = NULL}
 
 static uint8_t tps65132_cmd[3][2] = {
-	
+	/* 5.5V */
 	{TPS65132_VPOS_ADDRESS, 0x0F},
 	{TPS65132_VNEG_ADDRESS, 0x0F},
-	
+	/* Tablet mode */
 	{TPS65132_APPS_DIS_ADDRESS, 0x43},
 };
 
@@ -210,7 +213,7 @@ static int htc_a16_regulator_init(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	
+	/* VDDIO 1.8V is from DCDC2 3.1V of NCP6924 */
 	pwrdata->vddio = regulator_get(NULL, "ncp6924_dcdc2");
 	if (IS_ERR(pwrdata->vddio)) {
 		PR_DISP_ERR("%s: could not get vddio vreg, rc=%ld\n",
@@ -251,7 +254,9 @@ static int htc_a16_regulator_init(struct platform_device *pdev)
 
 static int htc_a16_regulator_deinit(struct platform_device *pdev)
 {
-	
+	/* devm_regulator() will automatically free regulators
+	   while dev detach. */
+	/* nothing */
 	return 0;
 }
 
@@ -283,16 +288,16 @@ void htc_a16_panel_reset(struct mdss_panel_data *pdata, int enable)
 		}
 
 		if (pdata->panel_info.panel_id == PANEL_ID_A16_MR_TRULY_HX8394D) {
-			
+			/* Reset */
 			gpio_set_value(ctrl_pdata->rst_gpio, 0);
 			usleep_range(1000, 1500);
 			gpio_set_value(ctrl_pdata->rst_gpio, 1);
 			usleep_range(5000, 5500);
 
-			
+			/* AVDD +5.5V */
 			gpio_set_value(pwrdata->lcmp5v, 1);
 			usleep_range(10000, 10500);
-			
+			/* AVDD -5.5V */
 			gpio_set_value(pwrdata->lcmn5v, 1);
 			usleep_range(2000, 2500);
 			if (strcmp(htc_get_bootmode(), bootstr))
@@ -304,7 +309,7 @@ void htc_a16_panel_reset(struct mdss_panel_data *pdata, int enable)
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_TRULY_HX8394F) ||
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_SUCCESS_HX8394D) ||
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_TRULY_HX8394D)) {
-			
+			/* Reset */
 			gpio_set_value(ctrl_pdata->rst_gpio, 0);
 			usleep_range(1000, 1500);
 			gpio_set_value(ctrl_pdata->rst_gpio, 1);
@@ -357,19 +362,19 @@ static int htc_a16_panel_power_on(struct mdss_panel_data *pdata, int enable)
 		}
 
 		if (pdata->panel_info.panel_id == PANEL_ID_A16_MR_TRULY_HX8394D) {
-			
+			/* VDDIO 1.8V */
 			ret = regulator_enable(pwrdata->vddio);
 			if (ret) {
 				PR_DISP_ERR("%s: regulator_enable (ncp6924) failed (%d)\n", __func__, ret);
 				return ret;
 			}
 			gpio_set_value(pwrdata->lcmio_en, 1);
-			
+			/* MIPI power 1.2V and MIPI DSI PLL power 1.8V are enabled when PM8909 is ON */
 		}else if ((pdata->panel_info.panel_id == PANEL_ID_A16_SUCCESS_HX8394F) ||
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_TRULY_HX8394F) ||
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_SUCCESS_HX8394D) ||
 				  (pdata->panel_info.panel_id == PANEL_ID_A16_TRULY_HX8394D)) {
-			
+			/* VDDIO 1.8V */
 			ret = regulator_enable(pwrdata->vddio);
 			if (ret) {
 				PR_DISP_ERR("%s: regulator_enable (ncp6924) failed (%d)\n", __func__, ret);
@@ -377,12 +382,12 @@ static int htc_a16_panel_power_on(struct mdss_panel_data *pdata, int enable)
 			}
 			gpio_set_value(pwrdata->lcmio_en, 1);
 			usleep_range(1000, 1500);
-			
+			/* MIPI power 1.2V and MIPI DSI PLL power 1.8V are enabled when PM8909 is ON */
 
-			
+			/* AVDD +5.5V */
 			gpio_set_value(pwrdata->lcmp5v, 1);
 			usleep_range(10000, 10500);
-			
+			/* AVDD -5.5V */
 			gpio_set_value(pwrdata->lcmn5v, 1);
 			usleep_range(2000, 2500);
 			if (strcmp(htc_get_bootmode(), bootstr))

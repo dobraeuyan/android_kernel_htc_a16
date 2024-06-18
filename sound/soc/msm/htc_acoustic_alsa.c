@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/switch.h>
 #include <sound/htc_acoustic_alsa.h>
+//#include <linux/htc_headset_mgr.h>
 
 struct device_info {
 	unsigned pcb_id;
@@ -116,6 +117,7 @@ EXPORT_SYMBOL(HTC_AUD_HW_LIST);
 #if 0
 extern unsigned int system_rev;
 #endif
+//extern unsigned skuid;	//not implemented
 void htc_acoustic_register_spk_amp(enum SPK_AMP_TYPE type,int (*aud_spk_amp_f)(int, int), struct file_operations* ops)
 {
 	mutex_lock(&spk_amp_lock);
@@ -248,6 +250,8 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (_IOC_TYPE(cmd) != ACOUSTIC_IOCTL_MAGIC)
 		return -ENOTTY;
 
+//	if (_IOC_SIZE(cmd) > sizeof(struct tfa9895_i2c_buffer))
+//		return -EINVAL;
 
 	us32_size = _IOC_SIZE(cmd);
 
@@ -322,6 +326,8 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			s32_value = the_ops->get_htc_revision();
 		}
 		else {
+			/* return 1 means lastest hw using
+			 *              * default configuration */
 			s32_value = 1;
 		}
 		if(sizeof(s32_value) <= us32_size) {
@@ -548,7 +554,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	}
 	case  _IOC_NR(ACOUSTIC_ADSP_CMD): {
-			
+			//uint16_t cmd_size;
 			struct avcs_crash_params config;
 			config.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
 						APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
@@ -713,6 +719,18 @@ void htc_amp_power_enable(bool enable)
 		the_amp_power_ops->set_amp_power_enable(enable);
 }
 
+/*static int htc_acoustic_hsnotify(int on)
+{
+	int i = 0;
+	mutex_lock(&hs_nt_lock);
+	for(i=0; i<HS_N_MAX; i++) {
+		if(hs_plug_nt[i].used && hs_plug_nt[i].callback_f)
+			hs_plug_nt[i].callback_f(hs_plug_nt[i].private_data, on);
+	}
+	mutex_unlock(&hs_nt_lock);
+
+	return 0;
+}*/
 
 static struct file_operations acoustic_fops = {
 	.owner = THIS_MODULE,
@@ -731,7 +749,7 @@ static struct miscdevice acoustic_misc = {
 static int __init acoustic_init(void)
 {
 	int ret = 0;
-	
+	//struct headset_notifier notifier;
 
 	ret = misc_register(&acoustic_misc);
 	wake_lock_init(&htc_acoustic_wakelock, WAKE_LOCK_SUSPEND, "htc_acoustic");
@@ -785,6 +803,9 @@ static int __init acoustic_init(void)
 		return ret;
 	}
 
+	/*notifier.id = HEADSET_REG_HS_INSERT;
+	notifier.func = htc_acoustic_hsnotify;
+	headset_notifier_register(&notifier);*/
 
 	return 0;
 }

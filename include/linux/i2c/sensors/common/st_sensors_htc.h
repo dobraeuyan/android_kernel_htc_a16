@@ -110,11 +110,24 @@ struct st_sensor_fullscale {
 	struct st_sensor_fullscale_avl fs_avl[ST_SENSORS_FULLSCALE_AVL_MAX];
 };
 
+/**
+ * struct st_sensor_bdu - ST sensor device block data update
+ * @addr: address of the register.
+ * @mask: mask to write the block data update flag.
+ */
 struct st_sensor_bdu {
 	u8 addr;
 	u8 mask;
 };
 
+/**
+ * struct st_sensor_data_ready_irq - ST sensor device data-ready interrupt
+ * @addr: address of the register.
+ * @mask: mask to write the on/off value.
+ * struct ig1 - represents the Interrupt Generator 1 of sensors.
+ * @en_addr: address of the enable ig1 register.
+ * @en_mask: mask to write the on/off value for enable.
+ */
 struct st_sensor_data_ready_irq {
 	u8 addr;
 	u8 mask;
@@ -124,12 +137,26 @@ struct st_sensor_data_ready_irq {
 	} ig1;
 };
 
+/**
+ * struct st_sensor_transfer_buffer - ST sensor device I/O buffer
+ * @buf_lock: Mutex to protect rx and tx buffers.
+ * @tx_buf: Buffer used by SPI transfer function to send data to the sensors.
+ *	This buffer is used to avoid DMA not-aligned issue.
+ * @rx_buf: Buffer used by SPI transfer to receive data from sensors.
+ *	This buffer is used to avoid DMA not-aligned issue.
+ */
 struct st_sensor_transfer_buffer {
 	struct mutex buf_lock;
 	u8 rx_buf[ST_SENSORS_RX_MAX_LENGTH];
 	u8 tx_buf[ST_SENSORS_TX_MAX_LENGTH] ____cacheline_aligned;
 };
 
+/**
+ * struct st_sensor_transfer_function - ST sensor device I/O function
+ * @read_byte: Function used to read one byte.
+ * @write_byte: Function used to write one byte.
+ * @read_multiple_byte: Function used to read multiple byte.
+ */
 struct st_sensor_transfer_function {
 	int (*read_byte) (struct st_sensor_transfer_buffer *tb,
 				struct device *dev, u8 reg_addr, u8 *res_byte);
@@ -140,6 +167,20 @@ struct st_sensor_transfer_function {
 							bool multiread_bit);
 };
 
+/**
+ * struct st_sensors - ST sensors list
+ * @wai: Contents of WhoAmI register.
+ * @sensors_supported: List of supported sensors by struct itself.
+ * @ch: IIO channels for the sensor.
+ * @odr: Output data rate register and ODR list available.
+ * @pw: Power register of the sensor.
+ * @enable_axis: Enable one or more axis of the sensor.
+ * @fs: Full scale register and full scale list available.
+ * @bdu: Block data update register.
+ * @drdy_irq: Data ready register of the sensor.
+ * @multi_read_bit: Use or not particular bit for [I2C/SPI] multi-read.
+ * @bootime: samples to discard when sensor passing from power-down to power-up.
+ */
 struct st_sensors {
 	u8 wai;
 	char sensors_supported[ST_SENSORS_MAX_4WAI][ST_SENSORS_MAX_NAME];
@@ -154,6 +195,20 @@ struct st_sensors {
 	unsigned int bootime;
 };
 
+/**
+ * struct st_sensor_data - ST sensor device status
+ * @dev: Pointer to instance of struct device (I2C or SPI).
+ * @trig: The trigger in use by the core driver.
+ * @sensor: Pointer to the current sensor struct in use.
+ * @current_fullscale: Maximum range of measure by the sensor.
+ * @enabled: Status of the sensor (false->off, true->on).
+ * @multiread_bit: Use or not particular bit for [I2C/SPI] multiread.
+ * @buffer_data: Data used by buffer part.
+ * @odr: Output data rate of the sensor [Hz].
+ * @get_irq_data_ready: Function to get the IRQ used for data ready signal.
+ * @tf: Transfer function structure used by I/O operations.
+ * @tb: Transfer buffers and mutex used by I/O operations.
+ */
 struct st_sensor_data {
 	struct device *dev;
 	struct iio_trigger *trig;
@@ -233,4 +288,4 @@ ssize_t st_sensors_sysfs_sampling_frequency_avail(struct device *dev,
 ssize_t st_sensors_sysfs_scale_avail(struct device *dev,
 				struct device_attribute *attr, char *buf);
 
-#endif 
+#endif /* ST_SENSORS_H */

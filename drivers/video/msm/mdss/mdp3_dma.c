@@ -505,6 +505,12 @@ static void mdp3_ccs_update(struct mdp3_dma *dma, bool from_kickoff)
 		cc_config |= dma->ccs_config.post_bias_sel << 7;
 		cc_config |= dma->ccs_config.pre_limit_sel << 8;
 		cc_config |= dma->ccs_config.post_limit_sel << 9;
+		/*
+		 * CCS dirty flag should be reset when call is made from frame
+		 * kickoff, or else upon resume the flag would be dirty and LUT
+		 * config could call this function thereby causing no register
+		 * programming for CCS, which will cause screen to go dark
+		 */
 		if (from_kickoff)
 			dma->ccs_config.ccs_dirty = false;
 		ccs_updated = true;
@@ -530,6 +536,10 @@ static void mdp3_ccs_update(struct mdp3_dma *dma, bool from_kickoff)
 
 	if (lut_updated || ccs_updated) {
 		MDP3_REG_WRITE(MDP3_REG_DMA_P_COLOR_CORRECT_CONFIG, cc_config);
+		/*
+		 * Make sure ccs configuration update is done before continuing
+		 * with the DMA transfer
+		 */
 		wmb();
 	}
 }
@@ -936,6 +946,10 @@ bool mdp3_dmap_busy(void)
 	return val & MDP3_DMA_P_BUSY_BIT;
 }
 
+/*
+ * During underrun DMA_P registers are reset. Reprogramming CSC to prevent
+ * black screen
+ */
 static void mdp3_dmap_underrun_worker(struct work_struct *work)
 {
 	struct mdp3_dma *dma;

@@ -26,7 +26,7 @@
 #include <linux/workqueue.h>
 #include <mach/htc_battery_core.h>
 #include <linux/alarmtimer.h>
-#if 0 
+#if 0 /* under porting */
 #include <linux/android_alarm.h>
 #endif
 #include <mach/devices_cmdline.h>
@@ -37,6 +37,7 @@
 #define USB_MA_1500    (1500)
 #define USB_MA_1600    (1600)
 
+// TODO: need USB owner to provide a common API
 #define DWC3_DCP	2
 
 static ssize_t htc_battery_show_property(struct device *dev,
@@ -187,10 +188,14 @@ int unregister_notifier_wireless_charger(struct notifier_block *nb)
 	return blocking_notifier_chain_unregister(&wireless_charger_notifier_list, nb);
 }
 
+/*
+ *  For Off-mode charging animation,
+ *  add a function for display driver to inform the charging animation mode.
+ */
 static int zcharge_enabled;
 int htc_battery_get_zcharge_mode(void)
 {
-#if 0	
+#if 0	/* Off-mode charging animation is defult on */
 	return zcharge_enabled;
 #else
 	return 1;
@@ -324,7 +329,7 @@ static ssize_t htc_battery_set_full_level(struct device *dev,
 
 	return count;
 }
-
+#if 0
 static ssize_t htc_battery_set_full_level_dis_batt_chg(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -348,7 +353,7 @@ static ssize_t htc_battery_set_full_level_dis_batt_chg(struct device *dev,
 
 	return count;
 }
-
+#endif
 int htc_battery_charger_disable()
 {
 	int rc = 0;
@@ -661,7 +666,7 @@ static struct device_attribute htc_set_delta_attrs[] = {
 	__ATTR(full_level, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_set_full_level),
 	__ATTR(full_level_dis_batt_chg, S_IWUSR | S_IWGRP, NULL,
-		htc_battery_set_full_level_dis_batt_chg),
+		htc_battery_set_full_level),
 	__ATTR(batt_debug_flag, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_debug_flag),
 	__ATTR(charger_control, S_IWUSR | S_IWGRP, htc_battery_charger_stat,
@@ -771,6 +776,8 @@ static int htc_battery_get_property(struct power_supply *psy,
 		val->intval = htc_battery_get_charging_status();
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
+		/* Fix me: temperature criteria should depend on projects,
+			   but not hard code. */
 		val->intval = POWER_SUPPLY_HEALTH_GOOD;
 		if (battery_core_info.rep.temp_fault != -1) {
 			if (battery_core_info.rep.temp_fault == 1)
@@ -871,7 +878,7 @@ static int htc_power_get_property(struct power_supply *psy,
 			val->intval = USB_MA_500 * 1000;
 
 		break;
-	
+	/* align to battery_core_info.rep.charging_source */
 	case POWER_SUPPLY_PROP_PRESENT :
 		if (charger == CHARGER_BATTERY)
 			val->intval  = 0;
@@ -1153,6 +1160,9 @@ int htc_battery_core_update_changed(void)
 		is_send_batt_uevent = 1;
 	}
 
+	/* To make sure that device is under over loading scenario, accumulate
+	   variable battery_over_loading only when device has been under charging
+	   and level is decreased. */
 	if ((battery_core_info.rep.charging_enabled != 0) &&
 		(new_batt_info_rep.charging_enabled != 0)) {
 		if (battery_core_info.rep.level > new_batt_info_rep.level)
@@ -1161,7 +1171,7 @@ int htc_battery_core_update_changed(void)
 			battery_over_loading = 0;
 	}
 
-	
+	/* Notify charging status to pnpmgr for performance */
 	if (battery_core_info.func.func_notify_pnpmgr_charging_enabled) {
 		if (battery_core_info.rep.charging_enabled !=
 				new_batt_info_rep.charging_enabled)
@@ -1171,6 +1181,10 @@ int htc_battery_core_update_changed(void)
 
 	memcpy(&battery_core_info.rep, &new_batt_info_rep, sizeof(struct battery_info_reply));
 
+	/*
+	 * To avoid one time error reading shutdown device.
+	 * Let userspace to see Tbatt > 68 C if it's > 68 C consuccessively 3 times
+	 */
 	if (battery_core_info.rep.batt_temp > 680) {
 		batt_temp_over_68c_count++;
 		if (batt_temp_over_68c_count < 3) {
@@ -1179,12 +1193,12 @@ int htc_battery_core_update_changed(void)
 			battery_core_info.rep.batt_temp = 680;
 		}
 	} else {
-		
+		/* reset count */
 		batt_temp_over_68c_count = 0;
 	}
 
-	
-	
+	/* overwrite fake info if test by power monitor flag is set */
+	/*  overwrite fake info if the FTM mode is FTM1 */
 	if (test_power_monitor) {
 		BATT_LOG("power_monitor(%d), fake batt info", test_power_monitor);
 		battery_core_info.rep.batt_id = 77;
@@ -1194,6 +1208,8 @@ int htc_battery_core_update_changed(void)
 	}
 
 	if (battery_core_info.rep.charging_source <= 0) {
+		/* ignore id fault if charger is not connected:
+		 * send fake valid if to userspace */
 		if (battery_core_info.rep.batt_id == 255) {
 			pr_info("[BATT] Ignore invalid id when no charging_source");
 			battery_core_info.rep.batt_id = 66;
@@ -1227,7 +1243,7 @@ int htc_battery_core_update_changed(void)
 				battery_core_info.htc_charge_full = 0;
 		}
 
-		
+		/* Clear htc_charge_full while over loading is happened. */
 		if (battery_over_loading >= 2) {
 			battery_core_info.htc_charge_full = 0;
 			battery_over_loading = 0;
@@ -1259,7 +1275,7 @@ int htc_battery_core_update_changed(void)
 			battery_core_info.rep.usb_overheat);
 
 
-	
+	/* send uevent if need */
 	if (is_send_batt_uevent) {
 		power_supply_changed(&htc_power_supplies[BATTERY_SUPPLY]);
 		BATT_LOG("power_supply_changed: battery");
@@ -1353,7 +1369,7 @@ int htc_battery_core_register(struct device *dev,
 		battery_core_info.func.func_ftm_charger_control =
 					htc_battery->func_ftm_charger_control;
 
-	
+	/* init power supplier framework */
 	for (i = 0; i < ARRAY_SIZE(htc_power_supplies); i++) {
 		rc = power_supply_register(dev, &htc_power_supplies[i]);
 		if (rc)
@@ -1361,10 +1377,10 @@ int htc_battery_core_register(struct device *dev,
 				" (%d)\n", rc);
 	}
 
-	
+	/* create htc detail attributes */
 	htc_battery_create_attrs(htc_power_supplies[CHARGER_BATTERY].dev);
 
-	
+	/* init charger_ctrl_timer */
 	charger_ctrl_stat = ENABLE_CHARGER;
 	INIT_WORK(&batt_charger_ctrl_work, batt_charger_ctrl_func);
 	alarm_init(&batt_charger_ctrl_alarm,
@@ -1373,7 +1389,7 @@ int htc_battery_core_register(struct device *dev,
 	batt_charger_ctrl_wq =
 			create_singlethread_workqueue("charger_ctrl_timer");
 
-	
+	/* init battery parameters. */
 	battery_core_info.update_time = jiffies;
 	battery_core_info.present = 1;
 	battery_core_info.htc_charge_full = 0;
@@ -1387,9 +1403,9 @@ int htc_battery_core_register(struct device *dev,
 	battery_core_info.rep.full_bat = 1580000;
 	battery_core_info.rep.full_level = 100;
 	battery_core_info.rep.full_level_dis_batt_chg = 100;
-	
+	/* initial state = -1, valid values: 0 or 1 */
 	battery_core_info.rep.temp_fault = -1;
-	
+	/* zero means battey info is not ready */
 	battery_core_info.rep.batt_state = 0;
 	battery_core_info.rep.cable_ready = 0;
 	battery_core_info.rep.overload = 0;

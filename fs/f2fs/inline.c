@@ -56,7 +56,7 @@ void read_inline_data(struct page *page, struct page *ipage)
 
 	zero_user_segment(page, MAX_INLINE_DATA, PAGE_CACHE_SIZE);
 
-	
+	/* Copy the whole inline data block */
 	src_addr = inline_data_addr(ipage);
 	dst_addr = kmap_atomic(page);
 	memcpy(dst_addr, src_addr, MAX_INLINE_DATA);
@@ -134,7 +134,7 @@ int f2fs_convert_inline_page(struct dnode_of_data *dn, struct page *page)
 
 	zero_user_segment(page, MAX_INLINE_DATA, PAGE_CACHE_SIZE);
 
-	
+	/* Copy the whole inline data block */
 	src_addr = inline_data_addr(dn->inode_page);
 	dst_addr = kmap_atomic(page);
 	memcpy(dst_addr, src_addr, MAX_INLINE_DATA);
@@ -144,10 +144,10 @@ int f2fs_convert_inline_page(struct dnode_of_data *dn, struct page *page)
 no_update:
 	set_page_dirty(page);
 
-	
+	/* clear dirty state */
 	dirty = clear_page_dirty_for_io(page);
 
-	
+	/* write data page to try to make data consistent */
 	set_page_writeback(page);
 	fio.blk_addr = dn->data_blkaddr;
 	write_data_page(dn, &fio);
@@ -157,10 +157,10 @@ no_update:
 	if (dirty)
 		inode_dec_dirty_pages(dn->inode);
 
-	
+	/* this converted inline_data should be recovered. */
 	set_inode_flag(F2FS_I(dn->inode), FI_APPEND_WRITE);
 
-	
+	/* clear inline data and flag after data writeback */
 	truncate_inline_inode(dn->inode_page, 0);
 clear_out:
 	stat_dec_inline_inode(dn->inode);
@@ -241,6 +241,14 @@ bool recover_inline_data(struct inode *inode, struct page *npage)
 	void *src_addr, *dst_addr;
 	struct page *ipage;
 
+	/*
+	 * The inline_data recovery policy is as follows.
+	 * [prev.] [next] of inline_data flag
+	 *    o       o  -> recover inline_data
+	 *    o       x  -> remove inline_data, and then recover data blocks
+	 *    x       o  -> remove inline_data, and then recover inline_data
+	 *    x       x  -> recover data blocks
+	 */
 	if (IS_INODE(npage))
 		ri = F2FS_INODE(npage);
 
@@ -307,6 +315,10 @@ struct f2fs_dir_entry *find_in_inline_dir(struct inode *dir,
 	else
 		f2fs_put_page(ipage, 0);
 
+	/*
+	 * For the most part, it should be a bug when name_len is zero.
+	 * We stop here for figuring out where the bugs has occurred.
+	 */
 	f2fs_bug_on(sbi, d.max < 0);
 	return de;
 }
@@ -343,7 +355,7 @@ int make_empty_inline_dir(struct inode *inode, struct inode *parent,
 
 	set_page_dirty(ipage);
 
-	
+	/* update i_size to MAX_INLINE_DATA */
 	if (i_size_read(inode) < MAX_INLINE_DATA) {
 		i_size_write(inode, MAX_INLINE_DATA);
 		set_inode_flag(F2FS_I(inode), FI_UPDATE_DIR);
@@ -351,6 +363,10 @@ int make_empty_inline_dir(struct inode *inode, struct inode *parent,
 	return 0;
 }
 
+/*
+ * NOTE: ipage is grabbed by caller, but if any error occurs, we should
+ * release ipage in this function.
+ */
 static int f2fs_convert_inline_dir(struct inode *dir, struct page *ipage,
 				struct f2fs_inline_dentry *inline_dentry)
 {
@@ -375,11 +391,17 @@ static int f2fs_convert_inline_dir(struct inode *dir, struct page *ipage,
 
 	dentry_blk = kmap_atomic(page);
 
-	
+	/* copy data from inline dentry block to new dentry block */
 	memcpy(dentry_blk->dentry_bitmap, inline_dentry->dentry_bitmap,
 					INLINE_DENTRY_BITMAP_SIZE);
 	memset(dentry_blk->dentry_bitmap + INLINE_DENTRY_BITMAP_SIZE, 0,
 			SIZE_OF_DENTRY_BITMAP - INLINE_DENTRY_BITMAP_SIZE);
+	/*
+	 * we do not need to zero out remainder part of dentry and filename
+	 * field, since we have used bitmap for marking the usage status of
+	 * them, besides, we can also ignore copying/zeroing reserved space
+	 * of dentry block, because them haven't been used so far.
+	 */
 	memcpy(dentry_blk->dentry, inline_dentry->dentry,
 			sizeof(struct f2fs_dir_entry) * NR_INLINE_DENTRY);
 	memcpy(dentry_blk->filename, inline_dentry->filename,
@@ -389,7 +411,7 @@ static int f2fs_convert_inline_dir(struct inode *dir, struct page *ipage,
 	SetPageUptodate(page);
 	set_page_dirty(page);
 
-	
+	/* clear inline dir and flag after data writeback */
 	truncate_inline_inode(ipage, 0);
 
 	stat_dec_inline_dir(dir);
@@ -452,7 +474,7 @@ int f2fs_add_inline_entry(struct inode *dir, const struct qstr *name,
 
 	set_page_dirty(ipage);
 
-	
+	/* we don't need to mark_inode_dirty now */
 	if (inode) {
 		F2FS_I(inode)->i_pino = dir->i_ino;
 		update_inode(inode, page);

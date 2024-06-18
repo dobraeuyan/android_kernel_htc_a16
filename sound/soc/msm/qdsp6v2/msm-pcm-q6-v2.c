@@ -67,8 +67,10 @@ struct snd_msm {
 #define CMD_EOS_MIN_TIMEOUT_LENGTH  50
 #define CMD_EOS_TIMEOUT_MULTIPLIER  (HZ * 50)
 
+// HTC_AUD_START
 int g_perf_mode = LEGACY_PCM_MODE;
 bool g_ultra_low_latency_supported = false;
+// HTC_AUD_END
 
 static struct snd_pcm_hardware msm_pcm_hardware_capture = {
 	.info =                 (SNDRV_PCM_INFO_MMAP |
@@ -114,6 +116,7 @@ static struct snd_pcm_hardware msm_pcm_hardware_playback = {
 	.fifo_size =            0,
 };
 
+/* Conventional and unconventional sample rate supported */
 static unsigned int supported_sample_rates[] = {
 	8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000,
 	88200, 96000, 176400, 192000
@@ -188,7 +191,7 @@ static void event_handler(uint32_t opcode,
 		pr_debug("token = 0x%08x\n", token);
 		in_frame_info[token][0] = payload[4];
 		in_frame_info[token][1] = payload[5];
-		
+		/* assume data size = 0 during flushing */
 		if (in_frame_info[token][0]) {
 			prtd->pcm_irq_pos += in_frame_info[token][0];
 			pr_debug("pcm_irq_pos=%d\n", prtd->pcm_irq_pos);
@@ -303,17 +306,17 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	prtd->pcm_size = snd_pcm_lib_buffer_bytes(substream);
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
 	prtd->pcm_irq_pos = 0;
-	
+	/* rate and channels are sent to audio driver */
 	prtd->samp_rate = runtime->rate;
 	prtd->channel_mode = runtime->channels;
 	if (prtd->enabled)
 		return 0;
 
-	
+	// HTC_AUDIO_START
 	if (prtd->audio_client->perf_mode == LOW_LATENCY_PCM_MODE ||
 			prtd->audio_client->perf_mode == ULTRA_LOW_LATENCY_PCM_MODE)
 		prtd->audio_client->perf_mode = g_perf_mode;
-	
+	// HTC_AUDIO_END
 	pr_debug("%s: perf: %x\n", __func__, pdata->perf_mode);
 
 	if (params_format(params) == SNDRV_PCM_FORMAT_S24_LE)
@@ -422,7 +425,7 @@ static int msm_pcm_capture_prepare(struct snd_pcm_substream *substream)
 	prtd->pcm_size = snd_pcm_lib_buffer_bytes(substream);
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
 	prtd->pcm_irq_pos = 0;
-	
+	/* rate and channels are sent to audio driver */
 	prtd->samp_rate = runtime->rate;
 	prtd->channel_mode = runtime->channels;
 
@@ -477,7 +480,7 @@ static int msm_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 			ret = q6asm_cmd_nowait(prtd->audio_client, CMD_PAUSE);
 			break;
 		}
-		
+		/* pending CMD_EOS isn't expected */
 		WARN_ON_ONCE(test_bit(CMD_EOS, &prtd->cmd_pending));
 		set_bit(CMD_EOS, &prtd->cmd_pending);
 		ret = q6asm_cmd_nowait(prtd->audio_client, CMD_EOS);
@@ -526,7 +529,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		runtime->hw = msm_pcm_hardware_playback;
 
-	
+	/* Capture path */
 	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 		runtime->hw = msm_pcm_hardware_capture;
 	else {
@@ -539,7 +542,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 				&constraints_sample_rates);
 	if (ret < 0)
 		pr_info("snd_pcm_hw_constraint_list failed\n");
-	
+	/* Ensure that buffer size is a multiple of period size */
 	ret = snd_pcm_hw_constraint_integer(runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
 	if (ret < 0)
@@ -675,7 +678,7 @@ static int msm_pcm_playback_close(struct snd_pcm_substream *substream)
 	if (prtd->audio_client) {
 		dir = IN;
 
-		
+		/* determine timeout length */
 		if (runtime->frame_bits == 0 || runtime->rate == 0) {
 			timeout = CMD_EOS_MIN_TIMEOUT_LENGTH;
 		} else {
@@ -912,6 +915,7 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 	dma_buf->bytes = params_buffer_bytes(params);
 	if (!dma_buf->area)
 		return -ENOMEM;
+// HTC_AUD_START
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if(g_perf_mode != LEGACY_PCM_MODE) {
 			if (params->reserved[0] == 1)
@@ -920,6 +924,7 @@ static int msm_pcm_hw_params(struct snd_pcm_substream *substream,
 				g_perf_mode = ULTRA_LOW_LATENCY_PCM_MODE;
 		}
 	}
+// HTC_AUD_END
 
 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
 	return 0;
@@ -1067,7 +1072,7 @@ static int msm_pcm_chmap_ctl_get(struct snd_kcontrol *kcontrol,
 	memset(ucontrol->value.integer.value, 0,
 		sizeof(ucontrol->value.integer.value));
 	if (!substream->runtime)
-		return 0; 
+		return 0; /* no channels set */
 
 	prtd = substream->runtime->private_data;
 
@@ -1246,10 +1251,12 @@ static int msm_pcm_probe(struct platform_device *pdev)
 		if (!rc) {
 			if (!strcmp(latency_level, "ultra")) {
 				pdata->perf_mode = ULTRA_LOW_LATENCY_PCM_MODE;
-				g_ultra_low_latency_supported = true; 
+				g_ultra_low_latency_supported = true; // HTC_AUDIO
 			}
 		}
+// HTC_AUD_START
 		g_perf_mode = pdata->perf_mode;
+// HTC_AUD_END
 	}
 	else
 		pdata->perf_mode = LEGACY_PCM_MODE;

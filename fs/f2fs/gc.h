@@ -8,25 +8,30 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#define GC_THREAD_MIN_WB_PAGES		1	
-#define DEF_GC_THREAD_MIN_SLEEP_TIME	30000	
+#define GC_THREAD_MIN_WB_PAGES		1	/*
+						 * a threshold to determine
+						 * whether IO subsystem is idle
+						 * or not
+						 */
+#define DEF_GC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
 #define DEF_GC_THREAD_MAX_SLEEP_TIME	60000
-#define DEF_GC_THREAD_NOGC_SLEEP_TIME	300000	
-#define LIMIT_INVALID_BLOCK	40 
-#define LIMIT_FREE_BLOCK	40 
+#define DEF_GC_THREAD_NOGC_SLEEP_TIME	300000	/* wait 5 min */
+#define LIMIT_INVALID_BLOCK	40 /* percentage over total user space */
+#define LIMIT_FREE_BLOCK	40 /* percentage over invalid + free space */
 
-#define DEF_MAX_VICTIM_SEARCH 4096 
+/* Search max. number of dirty segments to select a victim segment */
+#define DEF_MAX_VICTIM_SEARCH 4096 /* covers 8GB */
 
 struct f2fs_gc_kthread {
 	struct task_struct *f2fs_gc_task;
 	wait_queue_head_t gc_wait_queue_head;
 
-	
+	/* for gc sleep time */
 	unsigned int min_sleep_time;
 	unsigned int max_sleep_time;
 	unsigned int no_gc_sleep_time;
 
-	
+	/* for changing gc mode */
 	unsigned int gc_idle;
 };
 
@@ -35,6 +40,9 @@ struct gc_inode_list {
 	struct radix_tree_root iroot;
 };
 
+/*
+ * inline functions
+ */
 static inline block_t free_user_blocks(struct f2fs_sb_info *sbi)
 {
 	if (free_segments(sbi) < overprovision_segments(sbi))
@@ -82,6 +90,11 @@ static inline bool has_enough_invalid_blocks(struct f2fs_sb_info *sbi)
 {
 	block_t invalid_user_blocks = sbi->user_block_count -
 					written_block_count(sbi);
+	/*
+	 * Background GC is triggered with the following conditions.
+	 * 1. There are a number of invalid blocks.
+	 * 2. There is not enough free space.
+	 */
 	if (invalid_user_blocks > limit_invalid_user_blocks(sbi) &&
 			free_user_blocks(sbi) < limit_free_user_blocks(sbi))
 		return true;

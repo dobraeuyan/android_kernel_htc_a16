@@ -17,6 +17,7 @@
 
 #define F2FS_KEY_DESCRIPTOR_SIZE	8
 
+/* Policy provided via an ioctl on the topmost directory */
 struct f2fs_encryption_policy {
 	char version;
 	char contents_encryption_mode;
@@ -35,6 +36,17 @@ struct f2fs_encryption_policy {
 #define F2FS_POLICY_FLAGS_PAD_MASK	0x03
 #define F2FS_POLICY_FLAGS_VALID		0x03
 
+/**
+ * Encryption context for inode
+ *
+ * Protector format:
+ *  1 byte: Protector format (1 = this version)
+ *  1 byte: File contents encryption mode
+ *  1 byte: File names encryption mode
+ *  1 byte: Flags
+ *  8 bytes: Master Key descriptor
+ *  16 bytes: Encryption Key derivation nonce
+ */
 struct f2fs_encryption_context {
 	char format;
 	char contents_encryption_mode;
@@ -44,6 +56,7 @@ struct f2fs_encryption_context {
 	char nonce[F2FS_KEY_DERIVATION_NONCE_SIZE];
 } __attribute__((__packed__));
 
+/* Encryption parameters */
 #define F2FS_XTS_TWEAK_SIZE 16
 #define F2FS_AES_128_ECB_KEY_SIZE 16
 #define F2FS_AES_256_GCM_KEY_SIZE 32
@@ -76,16 +89,16 @@ struct f2fs_crypt_info {
 struct f2fs_crypto_ctx {
 	union {
 		struct {
-			struct page *bounce_page;       
-			struct page *control_page;      
+			struct page *bounce_page;       /* Ciphertext page */
+			struct page *control_page;      /* Original page  */
 		} w;
 		struct {
 			struct bio *bio;
 			struct work_struct work;
 		} r;
-		struct list_head free_list;     
+		struct list_head free_list;     /* Free list */
 	};
-	char flags;                      
+	char flags;                      /* Flags */
 };
 
 struct f2fs_completion_result {
@@ -118,13 +131,21 @@ static inline int f2fs_encryption_key_size(int mode)
 #define F2FS_CRYPTO_BLOCK_SIZE		16
 #define F2FS_FNAME_CRYPTO_DIGEST_SIZE	32
 
+/**
+ * For encrypted symlinks, the ciphertext length is stored at the beginning
+ * of the string in little-endian format.
+ */
 struct f2fs_encrypted_symlink_data {
 	__le16 len;
 	char encrypted_path[1];
 } __attribute__((__packed__));
 
+/**
+ * This function is used to calculate the disk space required to
+ * store a filename of length l in encrypted symlink format.
+ */
 static inline u32 encrypted_symlink_data_len(u32 l)
 {
 	return (l + sizeof(struct f2fs_encrypted_symlink_data) - 1);
 }
-#endif	
+#endif	/* _F2FS_CRYPTO_H */

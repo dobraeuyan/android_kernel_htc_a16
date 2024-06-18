@@ -145,7 +145,7 @@ static struct platform_device cable_detect_device = {
 
 static struct android_usb_platform_data android_usb_pdata = {
 	.vendor_id			= 0x0bb4,
-	.product_id			= 0x0dff, 
+	.product_id			= 0x0dff, /* Dummy Sense 4+ product id */
 	.product_name			= "Android Phone",
 	.manufacturer_name		= "HTC",
 	.serial_number			= "123456789012",
@@ -180,7 +180,7 @@ static struct platform_device android_usb_device = {
 
 static void msm8909_add_usb_devices(void)
 {
-	
+	//android_usb_pdata.serial_number = board_serialno();
 	platform_device_register(&android_usb_device);
 }
 
@@ -221,7 +221,7 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.decreased_batt_level_check = 0,
 	.force_shutdown_batt_vol = 3000,
 	.usb_temp_monitor_enable = 1,
-	
+	/* USB temp increases 30 degreeC after insert cable*/
 	.usb_overheat_rising_threshold = 300,
 	.usb_temp_overheat_threshold = 650,
 	.disable_pwrpath_after_eoc = 1,
@@ -297,8 +297,14 @@ int __init htc_batt_cell_register(void)
 	platform_device_register(&htc_battery_cell_pdev);
 	return 0;
 }
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
 
+/*
+ * Used to satisfy dependencies for devices that need to be
+ * run early or in a particular order. Most likely your device doesn't fall
+ * into this category, and thus the driver should not be added here. The
+ * EPROBE_DEFER can satisfy most dependency problems.
+ */
 static void __init msm8909_add_drivers(void)
 {
 	msm_smd_init();
@@ -317,6 +323,11 @@ static void __init msm8909_init(void)
 {
 	struct of_dev_auxdata *adata = msm8909_auxdata_lookup;
 
+	/*
+	 * populate devices from DT first so smem probe will get called as part
+	 * of msm_smem_init.  socinfo_init needs smem support so call
+	 * msm_smem_init before it.
+	 */
 	of_platform_populate(NULL, of_default_bus_match_table, adata, NULL);
 	msm_smem_init();
 

@@ -96,6 +96,10 @@ static struct f2fs_dir_entry *find_in_block(struct page *dentry_page,
 	else
 		kunmap(dentry_page);
 
+	/*
+	 * For the most part, it should be a bug when name_len is zero.
+	 * We stop here for figuring out where the bugs has occurred.
+	 */
 	f2fs_bug_on(F2FS_P_SB(dentry_page), d.max < 0);
 	return de;
 }
@@ -121,11 +125,11 @@ struct f2fs_dir_entry *find_target_dentry(struct f2fs_filename *fname,
 
 		de = &d->dentry[bit_pos];
 
-		
+		/* encrypted case */
 		de_name.name = d->filename[bit_pos];
 		de_name.len = le16_to_cpu(de->name_len);
 
-		
+		/* show encrypted name */
 		if (fname->hash) {
 			if (de->hash_code == fname->hash)
 				goto found;
@@ -139,7 +143,7 @@ struct f2fs_dir_entry *find_target_dentry(struct f2fs_filename *fname,
 			*max_slots = max_len;
 		max_len = 0;
 
-		
+		/* remain bug on condition */
 		if (unlikely(!de->name_len))
 			d->max = -1;
 
@@ -180,7 +184,7 @@ static struct f2fs_dir_entry *find_in_level(struct inode *dir,
 	end_block = bidx + nblock;
 
 	for (; bidx < end_block; bidx++) {
-		
+		/* no need to allocate new dentry pages to all the indices */
 		dentry_page = find_data_page(dir, bidx);
 		if (IS_ERR(dentry_page)) {
 			room = true;
@@ -205,6 +209,12 @@ static struct f2fs_dir_entry *find_in_level(struct inode *dir,
 	return de;
 }
 
+/*
+ * Find an entry in the specified directory with the wanted name.
+ * It returns the page where the entry was found (as a parameter - res_page),
+ * and the entry itself. Page is returned mapped and unlocked.
+ * Entry is guaranteed to be valid.
+ */
 struct f2fs_dir_entry *f2fs_find_entry(struct inode *dir, struct qstr *child,
 		struct page **res_page)
 {
@@ -299,7 +309,7 @@ static void init_dent_inode(const struct qstr *name, struct page *ipage)
 
 	f2fs_wait_on_page_writeback(ipage, NODE);
 
-	
+	/* copy name info. to this inode page */
 	ri = F2FS_INODE(ipage);
 	ri->i_namelen = cpu_to_le32(name->len);
 	memcpy(ri->i_name, name->name, name->len);
@@ -414,8 +424,16 @@ struct page *init_inode_metadata(struct inode *inode, struct inode *dir,
 	if (name)
 		init_dent_inode(name, page);
 
+	/*
+	 * This file should be checkpointed during fsync.
+	 * We lost i_pino from now on.
+	 */
 	if (is_inode_flag_set(F2FS_I(inode), FI_INC_LINK)) {
 		file_lost_pino(inode);
+		/*
+		 * If link the tmpfile to alias through linkat path,
+		 * we should remove this inode from orphan list.
+		 */
 		if (inode->i_nlink == 0)
 			remove_orphan_inode(F2FS_I_SB(dir), inode->i_ino);
 		inc_nlink(inode);
@@ -425,7 +443,7 @@ struct page *init_inode_metadata(struct inode *inode, struct inode *dir,
 put_error:
 	f2fs_put_page(page, 1);
 error:
-	
+	/* once the failed inode becomes a bad inode, i_mode is S_IFREG */
 	truncate_inode_pages(&inode->i_data, 0);
 	truncate_blocks(inode, 0, false);
 	remove_dirty_dir_inode(inode);
@@ -493,6 +511,10 @@ void f2fs_update_dentry(nid_t ino, umode_t mode, struct f2fs_dentry_ptr *d,
 		test_and_set_bit_le(bit_pos + i, (void *)d->bitmap);
 }
 
+/*
+ * Caller should grab and release a rwsem by calling f2fs_lock_op() and
+ * f2fs_unlock_op().
+ */
 int __f2fs_add_link(struct inode *dir, const struct qstr *name,
 				struct inode *inode, nid_t ino, umode_t mode)
 {
@@ -541,7 +563,7 @@ start:
 		goto out;
 	}
 
-	
+	/* Increase the depth, if required */
 	if (level == current_depth)
 		++current_depth;
 
@@ -568,7 +590,7 @@ start:
 		f2fs_put_page(dentry_page, 1);
 	}
 
-	
+	/* Move to next level to find the empty slot for new dentry */
 	++level;
 	goto start;
 add_dentry:
@@ -591,7 +613,7 @@ add_dentry:
 	set_page_dirty(dentry_page);
 
 	if (inode) {
-		
+		/* we don't need to mark_inode_dirty now */
 		F2FS_I(inode)->i_pino = dir->i_ino;
 		update_inode(inode, page);
 		f2fs_put_page(page, 1);
@@ -624,7 +646,7 @@ int f2fs_do_tmpfile(struct inode *inode, struct inode *dir)
 		err = PTR_ERR(page);
 		goto fail;
 	}
-	
+	/* we don't need to mark_inode_dirty now */
 	update_inode(inode, page);
 	f2fs_put_page(page, 1);
 
@@ -663,6 +685,10 @@ void f2fs_drop_nlink(struct inode *dir, struct inode *inode, struct page *page)
 		release_orphan_inode(sbi);
 }
 
+/*
+ * It only removes the dentry from the dentry page, corresponding name
+ * entry in name page does not need to be touched during deletion.
+ */
 void f2fs_delete_entry(struct f2fs_dir_entry *dentry, struct page *page,
 					struct inode *dir, struct inode *inode)
 {
@@ -682,11 +708,11 @@ void f2fs_delete_entry(struct f2fs_dir_entry *dentry, struct page *page,
 	for (i = 0; i < slots; i++)
 		test_and_clear_bit_le(bit_pos + i, &dentry_blk->dentry_bitmap);
 
-	
+	/* Let's check and deallocate this dentry page */
 	bit_pos = find_next_bit_le(&dentry_blk->dentry_bitmap,
 			NR_DENTRY_IN_BLOCK,
 			0);
-	kunmap(page); 
+	kunmap(page); /* kunmap - pair of f2fs_find_entry */
 	set_page_dirty(page);
 
 	dir->i_ctime = dir->i_mtime = CURRENT_TIME;
@@ -833,7 +859,7 @@ static int f2fs_readdir(struct file *file, void *dirent, filldir_t filldir)
 	bit_pos = (pos % NR_DENTRY_IN_BLOCK);
 	n = (pos / NR_DENTRY_IN_BLOCK);
 
-	
+	/* readahead for multi pages of dir */
 	if (npages - n > 1 && !ra_has_index(ra, n))
 		page_cache_sync_readahead(inode->i_mapping, ra, file, n,
 				min(npages - n, (pgoff_t)MAX_DIR_RA_PAGES));

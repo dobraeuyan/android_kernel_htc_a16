@@ -263,7 +263,7 @@ void mdp3_irq_deregister(void)
 	mdp3_res->irq_mask = 0;
 	MDP3_REG_WRITE(MDP3_REG_INTR_ENABLE, 0);
 	mdp3_res->irq_ref_cnt--;
-	
+	/* This can happen if suspend is called first */
 	if (mdp3_res->irq_ref_cnt < 0) {
 		irq_enabled = false;
 		mdp3_res->irq_ref_cnt = 0;
@@ -388,7 +388,7 @@ int mdp3_bus_scale_set_quota(int client, u64 ab_quota, u64 ib_quota)
 
 		bus_idx = (cur_bus_idx % (num_cases - 1)) + 1;
 
-		
+		/* aligning to avoid performing updates for small changes */
 		total_ab = ALIGN(total_ab, SZ_64M);
 		total_ib = ALIGN(total_ib, SZ_64M);
 
@@ -721,7 +721,7 @@ void mdp3_calc_dma_res(struct mdss_panel_info *panel_info, u64 *clk_rate,
 	if (clk_rate)
 		*clk_rate = mdp3_clk_round_off(clk);
 
-	
+	/* ab and ib vote should be same for honest voting */
 	if (ab || ib) {
 		if(ab)
 			*ab = clk * bpp;
@@ -1016,7 +1016,7 @@ int mdp3_dynamic_clock_gating_ctrl(int enable)
 {
 	int rc = 0;
 	int cgc_cfg = 0;
-	
+	/*Disable dynamic auto clock gating*/
 	rc = mdp3_clk_enable(1, 0);
 	if (rc) {
 		pr_err("fail to turn on MDP core clks\n");
@@ -1042,6 +1042,23 @@ int mdp3_dynamic_clock_gating_ctrl(int enable)
 	return rc;
 }
 
+/**
+ * mdp3_get_panic_lut_cfg() - calculate panic and robust lut mask
+ * @panel_width: Panel width
+ *
+ * DMA buffer has 16 fill levels. Which needs to configured as safe
+ * and panic levels based on panel resolutions.
+ * No. of fill levels used = ((panel active width * 8) / 512).
+ * Roundoff the fill levels if needed.
+ * half of the total fill levels used will be treated as panic levels.
+ * Roundoff panic levels if total used fill levels are odd.
+ *
+ * Sample calculation for 720p display:
+ * Fill levels used = (720 * 8) / 512 = 12.5 after round off 13.
+ * panic levels = 13 / 2 = 6.5 after roundoff 7.
+ * Panic mask = 0x3FFF (2 bits per level)
+ * Robust mask = 0xFF80 (1 bit per level)
+ */
 u64 mdp3_get_panic_lut_cfg(u32 panel_width)
 {
 	u32 fill_levels = (((panel_width * 8) / 512) + 1);
@@ -1080,12 +1097,12 @@ int mdp3_qos_remapper_setup(struct mdss_panel_data *panel)
 
 	if (!panel)
 		return -EINVAL;
-	
+	/* Program MDP QOS Remapper */
 	MDP3_REG_WRITE(MDP3_DMA_P_QOS_REMAPPER, 0x1A9);
 	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_0, 0x0);
 	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_1, 0x0);
 	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_2, 0x0);
-	
+	/* PANIC setting depends on panel width*/
 	MDP3_REG_WRITE(MDP3_PANIC_LUT0,	(panic_config & 0xFFFF));
 	MDP3_REG_WRITE(MDP3_PANIC_LUT1, ((panic_config >> 16) & 0xFFFF));
 	MDP3_REG_WRITE(MDP3_ROBUST_LUT, ((panic_config >> 32) & 0xFFFF));
@@ -1118,7 +1135,7 @@ static int mdp3_res_init(void)
 
 	mdp3_res->ion_client = msm_ion_client_create(mdp3_res->pdev->name);
 	if (IS_ERR_OR_NULL(mdp3_res->ion_client)) {
-		pr_err("msm_ion_client_create() return error (%p)\n",
+		pr_err("msm_ion_client_create() return error (%pK)\n",
 				mdp3_res->ion_client);
 		mdp3_res->ion_client = NULL;
 		return -EINVAL;
@@ -1219,13 +1236,13 @@ static int mdp3_get_pan_cfg(struct mdss_panel_cfg *pan_cfg)
 	} else if (mdss_mdp3_panel[0] == '1') {
 		pan_cfg->lk_cfg = true;
 	} else {
-		
+		/* read from dt */
 		pan_cfg->lk_cfg = true;
 		pan_cfg->pan_intf = MDSS_PANEL_INTF_INVALID;
 		return -EINVAL;
 	}
 
-	
+	/* skip lk cfg and delimiter; ex: "0:" */
 	strlcpy(pan_name, &mdss_mdp3_panel[2], MDSS_MAX_PANEL_LEN);
 	t = strnstr(pan_name, ":", MDSS_MAX_PANEL_LEN);
 	if (!t) {
@@ -1239,7 +1256,7 @@ static int mdp3_get_pan_cfg(struct mdss_panel_cfg *pan_cfg)
 		pan_intf_str[i] = *(pan_name + i);
 	pan_intf_str[i] = 0;
 	pr_debug("%s:%d panel intf %s\n", __func__, __LINE__, pan_intf_str);
-	
+	/* point to the start of panel name */
 	t = t + 1;
 	strlcpy(&pan_cfg->arg_cfg[0], t, sizeof(pan_cfg->arg_cfg));
 	pr_debug("%s:%d: t=[%s] panel name=[%s]\n", __func__, __LINE__,
@@ -1270,7 +1287,7 @@ static int mdp3_get_cmdline_config(struct platform_device *pdev)
 	panel_name = &pan_cfg->arg_cfg[0];
 	intf_type = &pan_cfg->pan_intf;
 
-	
+	/* reads from dt by default */
 	pan_cfg->lk_cfg = true;
 
 	len = strlen(mdss_mdp3_panel);
@@ -1284,7 +1301,7 @@ static int mdp3_get_cmdline_config(struct platform_device *pdev)
 	}
 
 	rc = mdp3_parse_dt_pan_intf(pdev);
-	
+	/* if pref pan intf is not present */
 	if (rc)
 		pr_err("%s:unable to parse device tree for pan intf\n",
 			__func__);
@@ -1513,7 +1530,7 @@ static void mdp3_iommu_meta_destroy(struct kref *kref)
 
 static void mdp3_iommu_meta_put(struct mdp3_iommu_meta *meta)
 {
-	
+	/* Need to lock here to prevent race against map/unmap */
 	mutex_lock(&mdp3_res->iommu_lock);
 	kref_put(&meta->ref, mdp3_iommu_meta_destroy);
 	mutex_unlock(&mdp3_res->iommu_lock);
@@ -1550,7 +1567,7 @@ void mdp3_unmap_iommu(struct ion_client *client, struct ion_handle *handle)
 	mutex_lock(&mdp3_res->iommu_lock);
 	meta = mdp3_iommu_meta_lookup(table);
 	if (!meta) {
-		WARN(1, "%s: buffer was never mapped for %p\n", __func__,
+		WARN(1, "%s: buffer was never mapped for %pK\n", __func__,
 				handle);
 		mutex_unlock(&mdp3_res->iommu_lock);
 		goto out;
@@ -1578,7 +1595,7 @@ static void mdp3_iommu_meta_add(struct mdp3_iommu_meta *meta)
 		} else if (meta->table > entry->table) {
 			p = &(*p)->rb_right;
 		} else {
-			pr_err("%s: handle %p already exists\n", __func__,
+			pr_err("%s: handle %pK already exists\n", __func__,
 				entry->handle);
 			BUG();
 		}
@@ -1605,6 +1622,11 @@ static int mdp3_iommu_map_iommu(struct mdp3_iommu_meta *meta,
 	size = meta->size;
 	table = meta->table;
 
+	/* Use the biggest alignment to allow bigger IOMMU mappings.
+	 * Use the first entry since the first entry will always be the
+	 * biggest entry. To take advantage of bigger mapping sizes both the
+	 * VA and PA addresses have to be aligned to the biggest size.
+	 */
 	if (sg_dma_len(table->sgl) > align)
 		align = sg_dma_len(table->sgl);
 
@@ -1622,7 +1644,7 @@ static int mdp3_iommu_map_iommu(struct mdp3_iommu_meta *meta,
 		goto out1;
 	}
 
-	
+	/* Adding padding to before buffer */
 	if (padding) {
 		unsigned long phys_addr = sg_phys(table->sgl);
 		ret = msm_iommu_map_extra(domain, meta->iova_addr, phys_addr,
@@ -1631,17 +1653,17 @@ static int mdp3_iommu_map_iommu(struct mdp3_iommu_meta *meta,
 			goto out1;
 	}
 
-	
+	/* Mapping actual buffer */
 	ret = iommu_map_range(domain, meta->iova_addr + padding,
 			table->sgl, size, prot);
 	if (ret) {
-		pr_err("%s: could not map %pa in domain %p\n",
+		pr_err("%s: could not map %pa in domain %pK\n",
 			__func__, &meta->iova_addr, domain);
 			unmap_size = padding;
 		goto out2;
 	}
 
-	
+	/* Adding padding to end of buffer */
 	if (padding) {
 		unsigned long phys_addr = sg_phys(table->sgl);
 		unsigned long extra_iova_addr = meta->iova_addr +
@@ -1701,6 +1723,10 @@ out:
 	return ERR_PTR(ret);
 }
 
+/*
+ * PPP hw reads in tiles of 16 which might be outside mapped region
+ * need to map buffers ourseleve to add extra padding
+ */
 int mdp3_self_map_iommu(struct ion_client *client, struct ion_handle *handle,
 	unsigned long align, unsigned long padding, dma_addr_t *iova,
 	unsigned long *buffer_size, unsigned long flags,
@@ -1722,7 +1748,7 @@ int mdp3_self_map_iommu(struct ion_client *client, struct ion_handle *handle,
 
 	padding = PAGE_ALIGN(padding);
 
-	
+	/* Adding 16 lines padding before and after buffer */
 	iova_length = size + 2 * padding;
 
 	if (size & ~PAGE_MASK) {
@@ -1754,12 +1780,12 @@ int mdp3_self_map_iommu(struct ion_client *client, struct ion_handle *handle,
 		}
 	} else {
 		if (iommu_meta->flags != iommu_flags) {
-			pr_err("%s: handle %p is already mapped with diff flag\n",
+			pr_err("%s: handle %pK is already mapped with diff flag\n",
 				__func__, handle);
 			ret = -EINVAL;
 			goto out_unlock;
 		} else if (iommu_meta->mapped_size != iova_length) {
-			pr_err("%s: handle %p is already mapped with diff len\n",
+			pr_err("%s: handle %pK is already mapped with diff len\n",
 				__func__, handle);
 			ret = -EINVAL;
 			goto out_unlock;
@@ -1881,7 +1907,7 @@ done:
 		data->addr += img->offset;
 		data->len -= img->offset;
 
-		pr_debug("mem=%d ihdl=%p buf=0x%pa len=0x%x\n", img->memory_id,
+		pr_debug("mem=%d ihdl=%pK buf=0x%pa len=0x%x\n", img->memory_id,
 			 data->srcp_ihdl, &data->addr, data->len);
 	} else {
 		mdp3_put_img(data, client);
@@ -1990,6 +2016,12 @@ static int mdp3_init(struct msm_fb_data_type *mfd)
 
 u32 mdp3_fb_stride(u32 fb_index, u32 xres, int bpp)
 {
+	/*
+	 * The adreno GPU hardware requires that the pitch be aligned to
+	 * 32 pixels for color buffers, so for the cases where the GPU
+	 * is writing directly to fb0, the framebuffer pitch
+	 * also needs to be 32 pixel aligned
+	 */
 
 	if (fb_index == 0)
 		return ALIGN(xres, 32) * bpp;
@@ -2101,7 +2133,7 @@ static int mdp3_alloc(struct msm_fb_data_type *mfd)
 		return ret;
 	}
 
-	pr_info("allocating %u bytes at %p (%lx phys) for fb %d\n",
+	pr_info("allocating %u bytes at %pK (%lx phys) for fb %d\n",
 		size, virt, phys, mfd->index);
 
 	mfd->fbi->screen_base = virt;
@@ -2130,7 +2162,7 @@ void mdp3_free(struct msm_fb_data_type *mfd)
 
 void mdp3_release_splash_memory(struct msm_fb_data_type *mfd)
 {
-	
+	/* Give back the reserved memory to the system */
 	if (mdp3_res->splash_mem_addr) {
 		mdp3_free(mfd);
 		pr_debug("mdp3_release_splash_memory\n");
@@ -2272,6 +2304,10 @@ static int mdp3_panel_register_done(struct mdss_panel_data *pdata)
 {
 	int rc = 0;
 
+	/*
+	* If idle pc feature is not enabled, then get a reference to the
+	* runtime device which will be released when device is turned off
+	*/
 	if (!mdp3_res->idle_pc_enabled ||
 		pdata->panel_info.type != MIPI_CMD_PANEL) {
 		pm_runtime_get_sync(&mdp3_res->pdev->dev);
@@ -2289,12 +2325,22 @@ static int mdp3_panel_register_done(struct mdss_panel_data *pdata)
 			rc = mdp3_continuous_splash_on(pdata);
 		}
 	}
+	/*
+	 * We want to prevent iommu from being enabled if there is
+	 * continue splash screen. This would have happened in
+	 * res_update in continuous_splash_on without this flag.
+	 */
 	if (pdata->panel_info.cont_splash_enabled == false)
 		mdp3_res->allow_iommu_update = true;
 
 	return rc;
 }
 
+/* mdp3_autorefresh_disable() - Disable Auto refresh
+ * @ panel_info : pointer to panel configuration structure
+ *
+ * This function displable Auto refresh block for command mode panel.
+ */
 int mdp3_autorefresh_disable(struct mdss_panel_info *panel_info) {
 	if ((panel_info->type == MIPI_CMD_PANEL) &&
 		(MDP3_REG_READ(MDP3_REG_AUTOREFRESH_CONFIG_P)))
@@ -2482,15 +2528,15 @@ int mdp3_misr_get(struct mdp_misr *misr_resp)
 	switch (misr_resp->block_id) {
 	case DISPLAY_MISR_DSI0:
 		MDP3_REG_WRITE(MDP3_REG_DSI_VIDEO_EN, 0);
-		
+		/* Sleep for one vsync after DSI video engine is disabled */
 		msleep(20);
-		
+		/* Enable DSI_VIDEO_0 MISR Block */
 		MDP3_REG_WRITE(MDP3_REG_MODE_DSI_PCLK, 0x20);
-		
+		/* Reset MISR Block */
 		MDP3_REG_WRITE(MDP3_REG_MISR_RESET_DSI_PCLK, 1);
-		
+		/* Clear MISR capture done bit */
 		MDP3_REG_WRITE(MDP3_REG_CAPTURED_DSI_PCLK, 0);
-		
+		/* Enable MDP DSI interface */
 		MDP3_REG_WRITE(MDP3_REG_DSI_VIDEO_EN, 1);
 		ret = readl_poll_timeout(mdp3_res->mdp_base +
 			MDP3_REG_CAPTURED_DSI_PCLK, result,
@@ -2498,7 +2544,7 @@ int mdp3_misr_get(struct mdp_misr *misr_resp)
 			MISR_POLL_SLEEP, MISR_POLL_TIMEOUT);
 			MDP3_REG_WRITE(MDP3_REG_MODE_DSI_PCLK, 0);
 		if (ret == 0) {
-			
+			/* Disable DSI MISR interface */
 			MDP3_REG_WRITE(MDP3_REG_MODE_DSI_PCLK, 0x0);
 			crc = MDP3_REG_READ(MDP3_REG_MISR_CAPT_VAL_DSI_PCLK);
 			pr_debug("CRC Val %d\n", crc);
@@ -2508,17 +2554,17 @@ int mdp3_misr_get(struct mdp_misr *misr_resp)
 		break;
 
 	case DISPLAY_MISR_DSI_CMD:
-		
+		/* Select DSI PCLK Domain */
 		MDP3_REG_WRITE(MDP3_REG_SEL_CLK_OR_HCLK_TEST_BUS, 0x004);
-		
+		/* Select Block id DSI_CMD */
 		MDP3_REG_WRITE(MDP3_REG_MODE_DSI_PCLK, 0x10);
-		
+		/* Reset MISR Block */
 		MDP3_REG_WRITE(MDP3_REG_MISR_RESET_DSI_PCLK, 1);
-		
+		/* Drive Data on Test Bus */
 		MDP3_REG_WRITE(MDP3_REG_EXPORT_MISR_DSI_PCLK, 0);
-		
+		/* Kikk off DMA_P */
 		MDP3_REG_WRITE(MDP3_REG_DMA_P_START, 0x11);
-		
+		/* Wait for DMA_P Done */
 		ret = readl_poll_timeout(mdp3_res->mdp_base +
 			MDP3_REG_INTR_STATUS, result,
 			result & MDP3_INTR_DMA_P_DONE_BIT,
@@ -2602,6 +2648,10 @@ int mdp3_footswitch_ctrl(int enable)
 	} else if (!enable && mdp3_res->fs_ena) {
 		active_cnt = atomic_read(&mdp3_res->active_intf_cnt);
 		if (active_cnt != 0) {
+			/*
+			 * Turning off GDSC while overlays are still
+			 * active.
+			 */
 			mdp3_res->idle_pc = true;
 			pr_debug("idle pc. active overlays=%d\n",
 				active_cnt);
@@ -2707,7 +2757,7 @@ static int mdp3_probe(struct platform_device *pdev)
 		pr_debug("%s: Enabling autosuspend\n", __func__);
 		pm_runtime_use_autosuspend(&pdev->dev);
 	}
-	
+	/* Enable PM runtime */
 	pm_runtime_set_suspended(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
@@ -2792,6 +2842,11 @@ static int mdp3_pm_resume(struct device *dev)
 {
 	dev_dbg(dev, "Display pm resume\n");
 
+	/*
+	 * It is possible that the runtime status of the mdp device may
+	 * have been active when the system was suspended. Reset the runtime
+	 * status to suspended state after a complete system resume.
+	 */
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
 	pm_runtime_enable(dev);
@@ -2828,7 +2883,7 @@ static int mdp3_runtime_resume(struct device *dev)
 	dev_dbg(dev, "Display pm runtime resume, active overlay cnt=%d\n",
 		atomic_read(&mdp3_res->active_intf_cnt));
 
-	
+	/* do not resume panels when coming out of idle power collapse */
 	if (!mdp3_res->idle_pc)
 		device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 
@@ -2858,7 +2913,7 @@ static int mdp3_runtime_suspend(struct device *dev)
 
 	mdp3_footswitch_ctrl(0);
 
-	
+	/* do not suspend panels when going in to idle power collapse */
 	if (!mdp3_res->idle_pc)
 		device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 
