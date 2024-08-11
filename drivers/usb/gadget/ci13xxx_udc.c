@@ -325,7 +325,7 @@ static int hw_device_init(void __iomem *base)
 
 	if (hw_ep_max == 0 || hw_ep_max > ENDPT_MAX)
 		return -ENODEV;
-	printk(KERN_WARNING "[USB] EP num %d\n",hw_ep_max);
+
 	/* setup lock mode ? */
 
 	/* ENDPTSETUPSTAT is '0' by default */
