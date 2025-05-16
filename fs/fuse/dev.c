@@ -13,6 +13,7 @@
 #include <linux/poll.h>
 #include <linux/uio.h>
 #include <linux/miscdevice.h>
+#include <linux/namei.h>
 #include <linux/pagemap.h>
 #include <linux/file.h>
 #include <linux/slab.h>
@@ -24,8 +25,6 @@
 
 MODULE_ALIAS_MISCDEV(FUSE_MINOR);
 MODULE_ALIAS("devname:fuse");
-
-#define wake_up_sync(x)   __wake_up_sync((x), TASK_NORMAL, 1)
 
 static struct kmem_cache *fuse_req_cachep;
 
@@ -322,7 +321,7 @@ static void queue_request(struct fuse_conn *fc, struct fuse_req *req)
 		req->waiting = 1;
 		atomic_inc(&fc->num_waiting);
 	}
-	wake_up_sync(&fc->waitq);
+	wake_up(&fc->waitq);
 	kill_fasync(&fc->fasync, SIGIO, POLL_IN);
 }
 
@@ -396,7 +395,7 @@ __releases(fc->lock)
 		flush_bg_queue(fc);
 	}
 	spin_unlock(&fc->lock);
-	wake_up_sync(&req->waitq);
+	wake_up(&req->waitq);
 	if (end)
 		end(fc, req);
 	fuse_put_request(fc, req);
@@ -1876,6 +1875,10 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	spin_unlock(&fc->lock);
 
 	err = copy_out_args(cs, &req->out, nbytes);
+	if (req->in.h.opcode == FUSE_CANONICAL_PATH) {
+		req->out.h.error = kern_path((char *)req->out.args[0].value, 0,
+							req->canonical_path);
+	}
 	fuse_copy_finish(cs);
 
 	spin_lock(&fc->lock);

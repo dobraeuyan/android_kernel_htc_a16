@@ -60,7 +60,5 @@ obj-$(CONFIG_BRCMSMAC)	+= brcm80211/
 
 obj-$(CONFIG_LIBRA_SDIOIF)	+= libra/
 obj-$(CONFIG_WCNSS_CORE)	+= wcnss/
+obj-$(CONFIG_WCNSS_CORE)	+= htc_wifi_nvs.o
 obj-$(CONFIG_CNSS)		+= cnss/
-# HTC WLAN
-obj-y						   += htc_wifi_nvs.o
-

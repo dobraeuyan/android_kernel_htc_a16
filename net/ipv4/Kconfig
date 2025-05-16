@@ -432,7 +432,7 @@ config INET_UDP_DIAG
 	---help---
 	  Support for UDP socket monitoring interface used by the ss tool.
 	  If unsure, say Y.
-	  
+
 config INET_DIAG_DESTROY
 	bool "INET: allow privileged process to administratively close sockets"
 	depends on INET_DIAG

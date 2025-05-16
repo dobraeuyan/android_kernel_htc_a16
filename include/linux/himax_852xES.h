@@ -99,7 +99,7 @@
 #define HX_LOADIN_CONFIG
 //#define HX_AUTO_UPDATE_FW
 //#define HX_AUTO_UPDATE_CONFIG		//if enable HX_AUTO_UPDATE_CONFIG, need to disable HX_LOADIN_CONFIG
-//#define HX_SMART_WAKEUP
+#define HX_SMART_WAKEUP
 //#define HX_DOT_VIEW
 //#define HX_PALM_REPORT
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_ESD_EN)

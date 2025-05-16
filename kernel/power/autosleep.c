@@ -27,62 +27,38 @@ static void try_to_suspend(struct work_struct *work)
 {
 	unsigned int initial_count, final_count;
 
-	if (!pm_get_wakeup_count(&initial_count, true)) {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] suspend abort, wakeup event nonzero\n");
-		htc_print_active_wakeup_sources();
-#endif
+	if (!pm_get_wakeup_count(&initial_count, true))
 		goto out;
-	}
 
 	mutex_lock(&autosleep_lock);
 
 	if (!pm_save_wakeup_count(initial_count) ||
 		system_state != SYSTEM_RUNNING) {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] suspend abort, events not matched or being processed\n");
-#endif
 		mutex_unlock(&autosleep_lock);
 		goto out;
 	}
 
 	if (autosleep_state == PM_SUSPEND_ON) {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] suspend abort, autosleep_state is ON\n");
-#endif
 		mutex_unlock(&autosleep_lock);
 		return;
 	}
 	if (autosleep_state >= PM_SUSPEND_MAX)
 		hibernate();
-	else {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] suspend start\n");
-#endif
+	else
 		pm_suspend(autosleep_state);
-	}
 
 	mutex_unlock(&autosleep_lock);
 
-	if (!pm_get_wakeup_count(&final_count, false)) {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] resume end\n");
-#endif
+	if (!pm_get_wakeup_count(&final_count, false))
 		goto out;
-	}
+
 	/*
 	 * If the wakeup occured for an unknown reason, wait to prevent the
 	 * system from trying to suspend and waking up in a tight loop.
 	 */
-	if (final_count == initial_count) {
-#ifdef CONFIG_HTC_POWER_DEBUG
-		pr_info("[R] wakeup occured for an unknown reason, wait HZ/2\n");
-#endif
+	if (final_count == initial_count)
 		schedule_timeout_uninterruptible(HZ / 2);
-	}
-#ifdef CONFIG_HTC_POWER_DEBUG
-	pr_info("[R] resume end\n");
-#endif
+
  out:
 	queue_up_suspend_work();
 }

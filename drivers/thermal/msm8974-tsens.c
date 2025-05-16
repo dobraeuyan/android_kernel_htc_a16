@@ -763,7 +763,7 @@ static void msm_tsens_get_temp(int sensor_hw_num, long *temp)
 }
 
 static int tsens_tz_get_temp(struct thermal_zone_device *thermal,
-			     long *temp)
+			     unsigned long *temp)
 {
 	struct tsens_tm_device_sensor *tm_sensor = thermal->devdata;
 
@@ -775,7 +775,7 @@ static int tsens_tz_get_temp(struct thermal_zone_device *thermal,
 	return 0;
 }
 
-int tsens_get_temp(struct tsens_device *device, long *temp)
+int tsens_get_temp(struct tsens_device *device, unsigned long *temp)
 {
 	if (tsens_is_ready() <= 0) {
 		pr_debug("TSENS early init not done\n");
@@ -892,7 +892,7 @@ static int tsens_tz_activate_trip_type(struct thermal_zone_device *thermal,
 }
 
 static int tsens_tz_get_trip_temp(struct thermal_zone_device *thermal,
-				   int trip, long *temp)
+				   int trip, unsigned long *temp)
 {
 	struct tsens_tm_device_sensor *tm_sensor = thermal->devdata;
 	unsigned int reg;

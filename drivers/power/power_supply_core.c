@@ -557,7 +557,7 @@ static void power_supply_dev_release(struct device *dev)
 
 #ifdef CONFIG_THERMAL
 static int power_supply_read_temp(struct thermal_zone_device *tzd,
-		long *temp)
+		unsigned long *temp)
 {
 	struct power_supply *psy;
 	union power_supply_propval val;
