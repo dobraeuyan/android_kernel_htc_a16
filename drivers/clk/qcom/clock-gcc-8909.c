@@ -2544,24 +2544,6 @@ static struct clk_lookup msm_clocks_lookup[] = {
 	CLK_LIST(gcc_snoc_qosgen_clk),
 };
 
-#if defined(CONFIG_HTC_DEBUG_FOOTPRINT)
-/* get effective cpu idx by clk */
-extern struct mux_div_clk a7ssmux;
-int clk_get_cpu_idx(struct clk *c)
-{
-	/* cpu0 ~ cpu3 are little cluster. */
-	if (c == &a7ssmux.c || c == &a7sspll.c || c == &gpll0_ao_clk_src.c)
-		return 0;
-
-	return -1;
-}
-
-int clk_get_l2_idx(struct clk *c)
-{
-	return -1;
-}
-#endif
-
 static int add_dev_opp(struct clk *c, struct device *dev,
 				unsigned long max_rate)
 {
@@ -2839,110 +2821,6 @@ static int __init msm_clock_debug_init(void)
 	return platform_driver_register(&msm_clock_debug_driver);
 }
 late_initcall(msm_clock_debug_init);
-
-#ifdef CONFIG_HTC_POWER_DEBUG
-static LIST_HEAD(clk_blocked_list);
-static DEFINE_SPINLOCK(clk_blocked_lock);
-
-struct clk_table {
-        struct list_head node;
-        struct clk_lookup *clocks;
-        size_t num_clocks;
-};
-
-int clock_blocked_register(struct clk_lookup *table, size_t size)
-{
-        struct clk_table *clk_table;
-        unsigned long flags;
-
-        clk_table = kmalloc(sizeof(*clk_table), GFP_KERNEL);
-        if (!clk_table)
-                return -ENOMEM;
-
-        clk_table->clocks = table;
-        clk_table->num_clocks = size;
-
-        spin_lock_irqsave(&clk_blocked_lock, flags);
-        list_add_tail(&clk_table->node, &clk_blocked_list);
-        spin_unlock_irqrestore(&clk_blocked_lock, flags);
-
-        return 0;
-}
-
-int is_xo_src(struct clk *clk)
-{
-        if (clk == NULL)
-                return 0;
-        if (clk == &xo_clk_src.c)
-                return 1;
-        else if (clk_get_parent(clk))
-                return is_xo_src(clk_get_parent(clk));
-        else
-                return 0;
-}
-
-void clk_ignore_list_add(const char *clock_name)
-{
-	struct clk_lookup *p, *cl = NULL;
-	int i;
-	for (i = 0; i < ARRAY_SIZE(msm_clocks_lookup); i++) {
-		p = &msm_clocks_lookup[i];
-		if (p->clk && !strcmp(p->clk->dbg_name, clock_name)) {
-			cl = p;
-		}
-	}
-	if (cl)
-		cl->clk->flags |= CLKFLAG_IGNORE;
-}
-
-int __init clk_ignore_list_init(void)
-{
-	/*
-	 * Prototype for clk ignore list
-	 * clk_ignore_list_add("gcc_blsp1_uart1_apps_clk");
-	 */
-	return 0;
-}
-module_init(clk_ignore_list_init);
-
-static int clock_blocked_print_one(struct clk *c)
-{
-        if (!c || !c->prepare_count)
-                return 0;
-
-        if (is_xo_src(c)) {
-                if (c->vdd_class)
-                        pr_info("%s not off block xo vdig level %ld, parent clk: %s\n",
-                                c->dbg_name, c->vdd_class->cur_level,
-                                clk_get_parent(c)?clk_get_parent(c)->dbg_name:"none");
-                else
-                        pr_info("%s not off block xo vdig level (none), parent clk: %s\n",
-                                c->dbg_name,
-                                clk_get_parent(c)?clk_get_parent(c)->dbg_name:"none");
-
-                return 1;
-        }
-        return 0;
-}
-
-void clock_blocked_print(void)
-{
-        struct clk_table *table;
-        unsigned long flags;
-        int i, cnt = 0;
-
-        spin_lock_irqsave(&clk_blocked_lock, flags);
-        list_for_each_entry(table, &clk_blocked_list, node) {
-                for (i = 0; i < table->num_clocks; i++)
-                        cnt += clock_blocked_print_one(table->clocks[i].clk);
-        }
-        spin_unlock_irqrestore(&clk_blocked_lock, flags);
-
-        if (cnt)
-                pr_info("%d clks are on that block xo or vddmin\n", cnt);
-
-}
-#endif
 
 /* MDSS DSI_PHY_PLL */
 static struct clk_lookup msm_clocks_gcc_mdss[] = {

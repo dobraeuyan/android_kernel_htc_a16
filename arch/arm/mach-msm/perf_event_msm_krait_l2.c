@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011,2012,2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011,2012,2014,2016 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -427,7 +427,7 @@ static int msm_l2_test_set_ev_constraint(struct perf_event *event)
 	u8 group = evt_type & 0x0000F;
 	u8 code = (evt_type & 0x00FF0) >> 4;
 	unsigned long flags;
-	u32 err = 0;
+	int err = 0;
 	u64 bitmap_t;
 	u32 shift_idx;
 
@@ -443,6 +443,11 @@ static int msm_l2_test_set_ev_constraint(struct perf_event *event)
 	raw_spin_lock_irqsave(&l2_pmu_constraints.lock, flags);
 
 	shift_idx = ((reg * 4) + group);
+
+	if (shift_idx >= PMU_CODES_SIZE) {
+		err =  -EINVAL;
+		goto out;
+	}
 
 	bitmap_t = 1 << shift_idx;
 
@@ -485,6 +490,7 @@ static int msm_l2_clear_ev_constraint(struct perf_event *event)
 	unsigned long flags;
 	u64 bitmap_t;
 	u32 shift_idx;
+	int err = 1;
 
 	if (evt_prefix == L2_TRACECTR_PREFIX)
 		return 1;
@@ -492,6 +498,10 @@ static int msm_l2_clear_ev_constraint(struct perf_event *event)
 
 	shift_idx = ((reg * 4) + group);
 
+	if (shift_idx >= PMU_CODES_SIZE) {
+		err = -EINVAL;
+		goto out;
+	}
 	bitmap_t = 1 << shift_idx;
 
 	/* Clear constraint bit. */
@@ -499,9 +509,9 @@ static int msm_l2_clear_ev_constraint(struct perf_event *event)
 
 	/* Clear code. */
 	l2_pmu_constraints.codes[shift_idx] = -1;
-
+out:
 	raw_spin_unlock_irqrestore(&l2_pmu_constraints.lock, flags);
-	return 1;
+	return err;
 }
 
 int get_num_events(void)

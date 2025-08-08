@@ -4,7 +4,7 @@ obj-y += timer.o
 endif
 obj-$(CONFIG_USE_OF) += board-dt.o
 
-obj-$(CONFIG_MSM_SCM) += htc_debug.o htc_anti_rollback.o
+obj-$(CONFIG_MSM_SCM) += htc_debug.o
 
 obj-y += acpuclock.o
 obj-$(CONFIG_HW_PERF_EVENTS) += perf_trace_counters.o
@@ -79,3 +79,5 @@ obj-$(CONFIG_MSM_SMCMOD) += smcmod.o
 obj-$(CONFIG_ARCH_MSM8974) += msm_mpmctr.o
 
 obj-$(CONFIG_PERFMAP) += perfmap.o
+
+obj-$(CONFIG_HAS_MACH_MEMUTILS) += memutils/

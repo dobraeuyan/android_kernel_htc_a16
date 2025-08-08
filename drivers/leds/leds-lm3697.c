@@ -160,7 +160,6 @@ void lm3697_set_brightness(struct lm3697_data *drvdata, int brt_val)
 		if (!drvdata->brightness)
 			drvdata->enable = false;
 
-		PR_DISP_INFO("%s: btr_val=%d \n",__func__, brt_val);
 	}
 }
 

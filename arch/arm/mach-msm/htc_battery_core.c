@@ -421,7 +421,6 @@ static ssize_t htc_battery_charger_switch(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("Set charger_control:%lu", enable);
 	if (enable >= END_CHARGER)
 		return -EINVAL;
 
@@ -464,7 +463,6 @@ static ssize_t htc_battery_ftm_charger_switch(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("Set charger_control:%lu", enable);
 	if (enable >= FTM_END_CHARGER)
 		return -EINVAL;
 
@@ -496,8 +494,6 @@ static ssize_t htc_battery_set_phone_call(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("set context phone_call=%lu", phone_call);
-
 	if (!battery_core_info.func.func_context_event_handler) {
 		BATT_ERR("No context_event_notify function!");
 		return -ENOENT;
@@ -522,8 +518,6 @@ static ssize_t htc_battery_set_play_music(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("set context play music=%lu", play_music);
-
 	if (!battery_core_info.func.func_context_event_handler) {
 		BATT_ERR("No context_event_notify function!");
 		return -ENOENT;
@@ -547,8 +541,6 @@ static ssize_t htc_battery_set_network_search(struct device *dev,
 	rc = strict_strtoul(buf, 10, &network_search);
 	if (rc)
 		return rc;
-
-	BATT_LOG("Set context network_search=%lu", network_search);
 
 	if (!battery_core_info.func.func_context_event_handler) {
 		BATT_ERR("No context_event_notify function!");
@@ -576,8 +568,6 @@ static ssize_t htc_battery_set_navigation(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("Set context navigation=%lu", navigation);
-
 	if (!battery_core_info.func.func_context_event_handler) {
 		BATT_ERR("No context_event_notify function!");
 		return -ENOENT;
@@ -604,8 +594,6 @@ static ssize_t htc_battery_set_context_event(struct device *dev,
 	if (rc)
 		return rc;
 
-	BATT_LOG("Set context event = %lu", event);
-
 	if (!battery_core_info.func.func_context_event_handler) {
 		BATT_ERR("No context_event_notify function!");
 		return -ENOENT;
@@ -626,8 +614,6 @@ static ssize_t htc_battery_trigger_store_battery_data(struct device *dev,
 	rc = strict_strtoul(buf, 10, &trigger_flag);
 	if (rc)
 		return rc;
-
-	BATT_LOG("Set context trigger_flag = %lu", trigger_flag);
 
 	if((trigger_flag != 0) && (trigger_flag != 1))
 		return -EINVAL;
@@ -1096,8 +1082,6 @@ static void batt_charger_ctrl_func(struct work_struct *work)
 static enum alarmtimer_restart
 batt_charger_ctrl_alarm_handler(struct alarm *alarm, ktime_t time)
 {
-	BATT_LOG("charger control alarm is timeout.");
-
 	queue_work(batt_charger_ctrl_wq, &batt_charger_ctrl_work);
 
 	return 0;
@@ -1106,7 +1090,6 @@ batt_charger_ctrl_alarm_handler(struct alarm *alarm, ktime_t time)
 void htc_battery_update_batt_uevent(void)
 {
 	power_supply_changed(&htc_power_supplies[BATTERY_SUPPLY]);
-	BATT_LOG("%s: power_supply_changed: battery", __func__);
 }
 
 int htc_battery_core_update_changed(void)
@@ -1188,8 +1171,6 @@ int htc_battery_core_update_changed(void)
 	if (battery_core_info.rep.batt_temp > 680) {
 		batt_temp_over_68c_count++;
 		if (batt_temp_over_68c_count < 3) {
-			pr_info("[BATT] batt_temp_over_68c_count=%d, (temp=%d)\n",
-					batt_temp_over_68c_count, battery_core_info.rep.batt_temp);
 			battery_core_info.rep.batt_temp = 680;
 		}
 	} else {
@@ -1200,7 +1181,6 @@ int htc_battery_core_update_changed(void)
 	/* overwrite fake info if test by power monitor flag is set */
 	/*  overwrite fake info if the FTM mode is FTM1 */
 	if (test_power_monitor) {
-		BATT_LOG("power_monitor(%d), fake batt info", test_power_monitor);
 		battery_core_info.rep.batt_id = 77;
 		battery_core_info.rep.batt_temp = 330;
 		battery_core_info.rep.level = 77;
@@ -1211,7 +1191,6 @@ int htc_battery_core_update_changed(void)
 		/* ignore id fault if charger is not connected:
 		 * send fake valid if to userspace */
 		if (battery_core_info.rep.batt_id == 255) {
-			pr_info("[BATT] Ignore invalid id when no charging_source");
 			battery_core_info.rep.batt_id = 66;
 		}
 	}
@@ -1253,44 +1232,18 @@ int htc_battery_core_update_changed(void)
 	battery_core_info.update_time = jiffies;
 	mutex_unlock(&battery_core_info.info_lock);
 
-	BATT_EMBEDDED("ID=%d,level=%d,level_raw=%d,vol=%d,temp=%d,current=%d,"
-		"chg_src=%d,chg_en=%d,full_bat=%d,over_vchg=%d,"
-		"batt_state=%d,cable_ready=%d,overload=%d,ui_chg_full=%d,"
-		"usb_temp=%d,usb_overheat=%d",
-			battery_core_info.rep.batt_id,
-			battery_core_info.rep.level,
-			battery_core_info.rep.level_raw,
-			battery_core_info.rep.batt_vol,
-			battery_core_info.rep.batt_temp,
-			battery_core_info.rep.batt_current,
-			battery_core_info.rep.charging_source,
-			battery_core_info.rep.charging_enabled,
-			battery_core_info.rep.full_bat,
-			battery_core_info.rep.over_vchg,
-			battery_core_info.rep.batt_state,
-			battery_core_info.rep.cable_ready,
-			battery_core_info.rep.overload,
-			battery_core_info.htc_charge_full,
-			battery_core_info.rep.usb_temp,
-			battery_core_info.rep.usb_overheat);
-
-
 	/* send uevent if need */
 	if (is_send_batt_uevent) {
 		power_supply_changed(&htc_power_supplies[BATTERY_SUPPLY]);
-		BATT_LOG("power_supply_changed: battery");
 	}
 	if (is_send_usb_uevent) {
 		power_supply_changed(&htc_power_supplies[USB_SUPPLY]);
-		BATT_LOG("power_supply_changed: usb");
 	}
 	if (is_send_ac_uevent) {
 		power_supply_changed(&htc_power_supplies[AC_SUPPLY]);
-		BATT_LOG("power_supply_changed: ac");
 	}
 	if (is_send_wireless_charger_uevent) {
 		power_supply_changed(&htc_power_supplies[WIRELESS_SUPPLY]);
-		BATT_LOG("power_supply_changed: wireless");
 	}
 
 	return 0;

@@ -178,7 +178,6 @@ int decode_encode_hdlc(void*data, int *len, unsigned char *buf_hdlc, int remove,
 
 	buf_9k = kzalloc(USB_MAX_OUT_BUF, GFP_KERNEL);
 	if (!buf_9k) {
-		DIAG_INFO("%s:out of memory\n", __func__);
 		return -ENOMEM;
 	}
 
@@ -192,7 +191,6 @@ int decode_encode_hdlc(void*data, int *len, unsigned char *buf_hdlc, int remove,
 
 	ret = diag_hdlc_decode(&hdlc);
 	if (!ret) {
-		DIAG_INFO("Packet dropped due to bad HDLC coding/CRC\n");
 		kfree(buf_9k);
 		return -EINVAL;
 	}
@@ -233,7 +231,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 			max_item = MAX(MAX(nv7K9K_table[0], nv7Konly_table[0]),
 					MAX(nv9Konly_table[0], nv7K9Kdiff_table[0]));
 			nv_num = *((uint16_t *)(buf+2));
-			DIAG_INFO("%s: id = 0x%x nv_num = %d \n", __func__, *(buf+1), nv_num);
 			for (j = 1; j < NV_TABLE_SZ; j++) {
 				if (j <= nv7K9K_table[0] && nv7K9K_table[j] == nv_num)
 					return  DM7K9K;
@@ -251,7 +248,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 			max_item = MAX(MAX(PRL7K9K_table[0], PRL7Konly_table[0]),
 					MAX(PRL9Konly_table[0], PRL7K9Kdiff_table[0]));
 			nv_num = *((uint16_t *)(buf+2));
-			DIAG_INFO("%s: id = 0x%x nv_num = %d \n", __func__, *(buf+1), nv_num);
 			for (j = 1; j < PRL_TABLE_SZ; j++) {
 				if (j <= PRL7K9K_table[0] && PRL7K9K_table[j] == nv_num)
 					return  DM7K9K;
@@ -267,7 +263,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 			return  NO_DEF_ITEM;
 		} else if (*(buf+1) == 0xC9) {
 			nv_num = *(buf+2);
-			DIAG_INFO("%s: id = 0x%x nv_num = %d \n", __func__, *(buf+1), nv_num);
 			if (*(buf+2) == 0x01 || *(buf+2) == 0x11)
 				return  DM7K9K;
 			else
@@ -277,7 +272,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 			max_item = MAX(MAX(M297K9K_table[0], M297Konly_table[0]),
 					MAX(M299Konly_table[0], M297K9Kdiff_table[0]));
 			nv_num = *((uint16_t *)(buf+2));
-			DIAG_INFO("%s: id = 0x%x nv_num = %d \n", __func__, *(buf+1), nv_num);
 			for (j = 1; j < M29_TABLE_SZ; j++) {
 				if (j <= M297K9K_table[0] && M297K9K_table[j] == nv_num)
 					return  DM7K9K;
@@ -301,7 +295,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 		} else if (*(buf+1) == 0x4B && *(buf+2) == 0x0D) {
 			return  DM7KONLY;
 		} else
-			DIAG_INFO("%s:id = 0x%x no default routing path\n", __func__, *(buf+1));
 		return NO_DEF_ID;
 	} else {
 		/*DIAG_INFO("%s: not EPST_PREFIX id = 0x%x route to USB!!!\n", __func__, *buf);*/
@@ -311,7 +304,6 @@ int checkcmd_modem_epst(unsigned char *buf)
 #elif defined(CONFIG_ARCH_MSM8960) || defined(CONFIG_ARCH_MSM8974) || defined(CONFIG_ARCH_MSM8226) \
 	 || defined(CONFIG_ARCH_MSM8994) || defined(CONFIG_ARCH_MSM8909)
 	if (*buf == 0xc && radio_initialized == 0 && diag2arm9query) {
-		DIAG_INFO("%s: modem is ready\n", __func__);
 		radio_initialized = 1;
 		wake_up_interruptible(&driver->wait_q);
 		return CHECK_MODEM_ALIVE;
@@ -346,12 +338,10 @@ int modem_to_userspace(void *buf, int r, int type, int is9k)
 	if (!ctxt->diag2arm9_opened)
 		return 0;
 	if (type == CHECK_MODEM_ALIVE) {
-		DIAG_INFO("%s: CHECK_MODEM_ALIVE. not route to userspace\n", __func__);
 		return 0;
 	}
 	req = xpst_req_get(ctxt, &ctxt->rx_arm9_idle);
 	if (!req) {
-		DIAG_INFO("There is no enough request to ARM11!!\n");
 		return 0;
 	}
 	memcpy(req->buf, buf, r);
@@ -368,8 +358,6 @@ int modem_to_userspace(void *buf, int r, int type, int is9k)
 	} else if (type == NO_DEF_ID) {
 		/*in this case, cmd may reply error message*/
 		value = *((uint8_t *)req->buf+2);
-		DIAG_INFO("%s:check error cmd=0x%x message=ox%x\n", __func__
-				, value, *((uint8_t *)req->buf+1));
 		if ((value == 0x27) || (value == 0x26)) {
 			if (is9k == 1) {
 				decode_encode_hdlc(buf, &r, req->buf, 0, 4);
@@ -408,10 +396,6 @@ static long htc_diag_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	unsigned long flags;
 	unsigned char temp_id_table[ID_TABLE_SZ];
 
-	DIAG_INFO("%s:%s(parent:%s): tgid=%d\n", __func__,
-			current->comm, current->parent->comm, current->tgid);
-
-
 	if (_IOC_TYPE(cmd) != USB_DIAG_IOC_MAGIC)
 		return -ENOTTY;
 
@@ -419,7 +403,6 @@ static long htc_diag_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case USB_DIAG_FUNC_IOC_ENABLE_SET:
 		if (copy_from_user(&tmp_value, argp, sizeof(int)))
 			return -EFAULT;
-		DIAG_INFO("diag: enable %d\n", tmp_value);
 		switch_set_state(&sw_htc_usb_diag, !!tmp_value);
 
 		htc_usb_enable_function("mtp,adb,mass_storage,diag", tmp_value?1:0);
