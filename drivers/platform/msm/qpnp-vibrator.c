@@ -166,7 +166,6 @@ static int qpnp_vib_set(struct qpnp_vib *vib, int on)
 					QPNP_VIB_EN_CTL(vib->base));
 			if (rc < 0)
 				return rc;
-			VIB_INFO_LOG("%s: ON, reg=0x%x\n", __func__, val);
 			vib->reg_en_ctl = val;
 		}
 	} else {
@@ -179,7 +178,6 @@ static int qpnp_vib_set(struct qpnp_vib *vib, int on)
 					QPNP_VIB_EN_CTL(vib->base));
 			if (rc < 0)
 				return rc;
-			VIB_INFO_LOG("%s: OFF, reg=0x%x\n", __func__, val);
 			vib->reg_en_ctl = val;
 			qpnp_vibrator_notifier_call_chain(0, NULL);
 		}
@@ -194,7 +192,6 @@ static void qpnp_vib_enable(struct timed_output_dev *dev, int value)
 	struct qpnp_vib *vib = container_of(dev, struct qpnp_vib,
 					 timed_dev);
 
-	VIB_INFO_LOG("%s: %d\n", __func__, value);
 	mutex_lock(&vib->lock);
 	hrtimer_cancel(&vib->vib_timer);
 

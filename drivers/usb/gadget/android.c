@@ -368,8 +368,6 @@ static void android_pm_qos_update_latency(struct android_dev *dev, u32 latency)
 	if (latency == last_vote || !latency)
 		return;
 
-	pr_debug("%s: latency updated to: %d\n", __func__, latency);
-
 	pm_qos_update_request(&dev->pm_qos_req_dma, latency);
 
 	last_vote = latency;
@@ -445,9 +443,6 @@ static void android_pm_qos_work(struct work_struct *data)
 		dev->curr_pm_qos_state = next_state;
 		next_latency = dev->pdata->pm_qos_latency[next_state];
 		android_pm_qos_update_latency(dev, next_latency);
-		pr_debug("%s: pm_qos_state:%s, interrupts in last sample:%d\n",
-				 __func__, pm_qos_to_string(next_state),
-				curr_sample_int_count);
 	}
 
 	queue_delayed_work(system_nrt_wq, &dev->pm_qos_work,

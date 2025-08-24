@@ -1535,13 +1535,8 @@ inline static int is_voltage_critical_low(int voltage_mv)
 
 static void check_recharge_after_eoc(void)
 {
-	/* Allow input current if battery level
-		drop below 97% after EoC by HW request*/
-	if (htc_batt_info.icharger->set_charger_after_eoc){
-		if(batt_full_eoc_stop && htc_batt_info.rep.level_raw <= RECHARGE_LEVEL){
-			BATT_LOG("%s: set charger to %d due to raw_level: %d%% drop",
-					__func__, !!htc_batt_info.rep.charging_enabled,
-					htc_batt_info.rep.level_raw);
+	if (htc_batt_info.icharger->set_charger_after_eoc) {
+		if (batt_full_eoc_stop && htc_batt_info.rep.level_raw <= RECHARGE_LEVEL) {
 			htc_batt_info.icharger->set_charger_after_eoc(true);
 		}
 	}
@@ -1549,15 +1544,13 @@ static void check_recharge_after_eoc(void)
 
 static void check_recharge_recover(void)
 {
-	/* Check recharge is not start when raw level drop below 95% */
-	if (htc_batt_info.icharger->set_charger_after_eoc){
-		if(htc_batt_info.rep.level_raw <= RECHARGE_RECOVER_LEVEL){
-			BATT_LOG("%s: recover recharge due to raw_level: %d%% drop",
-					__func__, htc_batt_info.rep.level_raw);
+	if (htc_batt_info.icharger->set_charger_after_eoc) {
+		if (htc_batt_info.rep.level_raw <= RECHARGE_RECOVER_LEVEL) {
 			htc_batt_info.icharger->set_charger_after_eoc(true);
 		}
 	}
 }
+
 
 #define CHG_ONE_PERCENT_LIMIT_PERIOD_MS	(1000 * 60)
 #define LEVEL_GAP_BETWEEN_UI_AND_RAW		3
@@ -1605,11 +1598,6 @@ static void batt_monitor_usb_overheat(void)
 				htc_batt_info.usb_overheat_rising_threshold ||
 				(htc_batt_info.rep.usb_temp > htc_batt_info.usb_temp_overheat_threshold)) {
 			htc_batt_info.rep.usb_overheat = 1;
-			BATT_LOG("%s: USB overheat! cable_in_usb_temp:%d, usb_temp:%d,"
-				"overheat_rising_threshold:%d, overheat_threshold:%d\n",
-				__func__, cable_in_usb_temp, htc_batt_info.rep.usb_temp,
-				htc_batt_info.usb_overheat_rising_threshold,
-				htc_batt_info.usb_temp_overheat_threshold);
 			htc_charger_event_notify(HTC_CHARGER_EVENT_USB_OVERHEAT);
 		}
 	} else { /* Cable is removed */
